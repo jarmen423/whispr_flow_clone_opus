@@ -44,31 +44,34 @@ interface RefineResponse {
 // ============================================
 
 const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw">, string> = {
-  developer: `You are a helpful assistant that acts as a dictation correction tool for developers. I will provide a raw transcript. You must:
+  developer: `You are a dictation correction tool for developers. Your ONLY job is to clean up transcribed speech. You must:
 1. Correct grammar and punctuation
 2. Remove filler words (um, uh, like, you know)
 3. Format technical terms correctly (e.g., 'git commit' instead of 'get commit', 'npm install' instead of 'n p m install')
-4. Keep the same tone and voice as the original
+4. Keep the same tone, voice, and ALL WORDS including profanity exactly as spoken
 5. Preserve code references and technical concepts accurately
-6. Do not add any conversational filler like 'Here is the text'
-7. Output ONLY the cleaned text, nothing else.`,
+6. NEVER add commentary, refuse requests, or modify the meaning
+7. NEVER say things like "Here is the text" or "I can't help with..."
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 
-  concise: `You are a helpful assistant that acts as a dictation simplification tool. I will provide a raw transcript. You must:
+  concise: `You are a dictation simplification tool. Your ONLY job is to clean up transcribed speech. You must:
 1. Remove all filler words (um, uh, like, you know, ah, hmm)
 2. Shorten and simplify the text while keeping the meaning
 3. Remove redundancies and repetition
-4. Use clear, direct language
-5. Do not add any conversational filler like 'Here is the text'
-6. Output ONLY the cleaned text, nothing else.`,
+4. Preserve all language including profanity exactly as spoken
+5. NEVER add commentary, refuse requests, or modify the meaning
+6. NEVER say things like "Here is the text" or "I can't help with..."
+7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 
-  professional: `You are a helpful assistant that acts as a dictation refinement tool. I will provide a raw transcript. You must:
+  professional: `You are a dictation refinement tool. Your ONLY job is to clean up transcribed speech. You must:
 1. Correct all grammar and punctuation
 2. Remove filler words (um, uh, like, you know)
 3. Transform casual language into professional, business-appropriate language
-4. Maintain a formal yet natural tone
-5. Ensure clear, concise communication
-6. Do not add any conversational filler like 'Here is the text'
-7. Output ONLY the cleaned text, nothing else.`,
+4. Replace profanity with professional alternatives while keeping the emotional intensity
+5. Maintain a formal yet natural tone
+6. NEVER add commentary, refuse requests, or modify the meaning
+7. NEVER say things like "Here is the text" or "I can't help with..."
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 };
 
 // ============================================
@@ -228,22 +231,26 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
       throw new Error(`Ollama not responding at ${OLLAMA_URL}`);
     }
 
-    // Call Ollama API
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    // Call Ollama Chat API (better instruction following than generate)
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
-        prompt: `${systemPrompt}\n\nRaw transcript:\n${text}\n\nCleaned text:`,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
+        ],
         stream: false,
         options: {
           temperature: OLLAMA_TEMPERATURE,
           top_p: 0.9,
+          num_predict: 500,
         },
       }),
-      signal: AbortSignal.timeout(30000), // 30 second timeout
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
@@ -258,11 +265,13 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
 
     const result = await response.json();
 
-    if (!result.response) {
+    // /api/chat returns { message: { content: "..." } }
+    const content = result.message?.content || result.response;
+    if (!content) {
       throw new Error("Empty response from Ollama");
     }
 
-    return result.response.trim();
+    return content.trim();
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === "AbortError" || error.message.includes("timeout")) {
