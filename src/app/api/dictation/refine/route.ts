@@ -220,6 +220,9 @@ async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): 
 async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
   const systemPrompt = SYSTEM_PROMPTS[mode];
 
+  console.log(`[Refine] Calling Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
+  console.log(`[Refine] Input text (${text.length} chars): "${text.substring(0, 100)}..."`);
+
   try {
     // Test Ollama connection first
     const testResponse = await fetch(`${OLLAMA_URL}/api/tags`, {
@@ -232,24 +235,28 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
     }
 
     // Call Ollama Chat API (better instruction following than generate)
+    const requestBody = {
+      model: OLLAMA_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text }
+      ],
+      stream: false,
+      options: {
+        temperature: OLLAMA_TEMPERATURE,
+        top_p: 0.9,
+        num_predict: 500,
+      },
+    };
+
+    console.log(`[Refine] Request body:`, JSON.stringify({ ...requestBody, messages: requestBody.messages.map(m => ({ role: m.role, content: m.content.substring(0, 50) + "..." })) }));
+
     const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: text }
-        ],
-        stream: false,
-        options: {
-          temperature: OLLAMA_TEMPERATURE,
-          top_p: 0.9,
-          num_predict: 500,
-        },
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(30000),
     });
 
@@ -265,11 +272,15 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
 
     const result = await response.json();
 
+    console.log(`[Refine] Ollama response:`, JSON.stringify(result).substring(0, 500));
+
     // /api/chat returns { message: { content: "..." } }
     const content = result.message?.content || result.response;
     if (!content) {
       throw new Error("Empty response from Ollama");
     }
+
+    console.log(`[Refine] Refined text (${content.length} chars): "${content}"`);
 
     return content.trim();
   } catch (error) {
