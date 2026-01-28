@@ -314,12 +314,13 @@ class LocalFlowAgent:
             self.sio.connect(
                 CONFIG.websocket_url,
                 namespaces=["/agent"],
-                transports=["websocket"],
                 wait_timeout=10,
             )
             return True
         except Exception as e:
             log_error(f"Failed to connect: {e}")
+            import traceback # DEBUG
+            traceback.print_exc() # DEBUG
             return False
 
     def _send_heartbeat(self):

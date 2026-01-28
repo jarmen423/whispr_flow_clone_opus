@@ -54,7 +54,7 @@ const io = new Server(httpServer, {
     origin: ALLOWED_ORIGINS,
     credentials: true,
   },
-  transports: ["websocket"],
+  transports: ["polling", "websocket"],
   maxHttpBufferSize: 10 * 1024 * 1024, // 10MB max message size
 });
 
