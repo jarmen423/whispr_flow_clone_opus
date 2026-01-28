@@ -1,17 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Environment configuration
-const PROCESSING_MODE = process.env.PROCESSING_MODE || "cloud";
+// ============================================
+// Environment Configuration
+// ============================================
+
+// Processing mode: 'cloud' | 'networked-local' | 'local'
+const PROCESSING_MODE = process.env.PROCESSING_MODE || "networked-local";
+
+// Z.AI Cloud API Configuration
+const ZAI_API_KEY = process.env.ZAI_API_KEY || "";
+const ZAI_API_BASE_URL = process.env.ZAI_API_BASE_URL || "https://api.z.ai/api/paas/v4";
+const ZAI_LLM_MODEL = process.env.ZAI_LLM_MODEL || "glm-4.7-flash";
+
+// Ollama Configuration (for networked-local and local modes)
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:1b";
 const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
+
+// ============================================
+// Types
+// ============================================
 
 type RefinementMode = "developer" | "concise" | "professional" | "raw";
 
 interface RefineRequest {
   text: string;
   mode?: RefinementMode;
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
 }
 
 interface RefineResponse {
@@ -19,12 +34,15 @@ interface RefineResponse {
   refinedText?: string;
   originalWordCount?: number;
   refinedWordCount?: number;
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   error?: string;
   details?: string;
 }
 
-// System prompts for each refinement mode
+// ============================================
+// System Prompts
+// ============================================
+
 const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw">, string> = {
   developer: `You are a helpful assistant that acts as a dictation correction tool for developers. I will provide a raw transcript. You must:
 1. Correct grammar and punctuation
@@ -53,6 +71,10 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw">, string> = {
 7. Output ONLY the cleaned text, nothing else.`,
 };
 
+// ============================================
+// Utilities
+// ============================================
+
 /**
  * Count words in text
  */
@@ -79,7 +101,7 @@ function validateRequest(data: unknown): data is RefineRequest {
     throw new Error("Invalid refinement mode");
   }
 
-  if (req.processingMode && !["cloud", "local"].includes(req.processingMode as string)) {
+  if (req.processingMode && !["cloud", "networked-local", "local"].includes(req.processingMode as string)) {
     throw new Error("Invalid processing mode");
   }
 
@@ -87,50 +109,112 @@ function validateRequest(data: unknown): data is RefineRequest {
 }
 
 /**
- * Cloud refinement using LLM
- * In production, this would use z-ai-web-dev-sdk
+ * Determine effective processing mode based on configuration
  */
-async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
-  // In production, this would use the system prompt with the actual LLM
-  const _systemPrompt = SYSTEM_PROMPTS[mode];
+function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" | "local" {
+  const mode = requestedMode || PROCESSING_MODE;
 
-  // In a real implementation, you would use:
-  // import { ZAI } from "z-ai-web-dev-sdk";
-  // const zai = new ZAI();
-  // const result = await zai.chat.completions.create({
-  //   messages: [
-  //     { role: "assistant", content: systemPrompt },
-  //     { role: "user", content: text }
-  //   ],
-  //   thinking: { type: "disabled" }
-  // });
-
-  // For demo purposes, simulate LLM processing
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
-  // Simple refinement simulation
-  let refined = text
-    .replace(/\b(um|uh|like|you know|ah|hmm)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  // Capitalize first letter
-  if (refined) {
-    refined = refined.charAt(0).toUpperCase() + refined.slice(1);
+  // Cloud mode requires API key
+  if (mode === "cloud") {
+    if (!ZAI_API_KEY) {
+      console.warn("[Refine] Cloud mode requested but ZAI_API_KEY not set, falling back to networked-local");
+      return "networked-local";
+    }
+    return "cloud";
   }
 
-  // Ensure ending punctuation
-  if (refined && !/[.!?]$/.test(refined)) {
-    refined += ".";
-  }
-
-  return refined || text;
+  // Networked-local and local both use Ollama, just at different URLs
+  return mode as "networked-local" | "local";
 }
 
+// ============================================
+// Cloud Refinement (Z.AI API)
+// ============================================
+
 /**
- * Local refinement using Ollama
+ * Refine text using Z.AI GLM-4.7-Flash API
+ * API Docs: https://docs.z.ai/api-reference/llm/chat-completion
  */
-async function refineLocal(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
+async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
+  if (!ZAI_API_KEY) {
+    throw new Error(
+      "ZAI_API_KEY is required for cloud mode. " +
+      "Get your API key from: https://z.ai/manage-apikey/apikey-list"
+    );
+  }
+
+  const systemPrompt = SYSTEM_PROMPTS[mode];
+
+  try {
+    const response = await fetch(`${ZAI_API_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ZAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: ZAI_LLM_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Raw transcript:\n${text}\n\nCleaned text:` },
+        ],
+        temperature: 0.1,
+        top_p: 0.9,
+        max_tokens: 2000,
+        stream: false,
+        // Disable thinking mode for faster responses
+        thinking: { type: "disabled" },
+      }),
+      signal: AbortSignal.timeout(30000), // 30 second timeout
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+
+      // Handle common error cases
+      if (response.status === 401) {
+        throw new Error("Invalid ZAI_API_KEY. Check your API key at https://z.ai/manage-apikey/apikey-list");
+      }
+      if (response.status === 429) {
+        throw new Error("Z.AI rate limit exceeded. Please try again later.");
+      }
+
+      throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    // Z.AI returns OpenAI-compatible format: { choices: [{ message: { content: "..." } }] }
+    const refinedText = result.choices?.[0]?.message?.content;
+
+    if (!refinedText) {
+      throw new Error("Empty response from Z.AI LLM");
+    }
+
+    return refinedText.trim();
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || error.message.includes("timeout")) {
+        throw new Error("Z.AI API request timed out (30s limit)");
+      }
+      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+        throw new Error("Failed to connect to Z.AI API. Check your internet connection.");
+      }
+      throw error;
+    }
+    throw new Error("Unknown error during cloud refinement");
+  }
+}
+
+// ============================================
+// Local/Networked Refinement (Ollama)
+// ============================================
+
+/**
+ * Refine text using Ollama API
+ * Works for both networked-local and local modes (just different OLLAMA_URL)
+ */
+async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
   const systemPrompt = SYSTEM_PROMPTS[mode];
 
   try {
@@ -195,6 +279,10 @@ async function refineLocal(text: string, mode: Exclude<RefinementMode, "raw">): 
   }
 }
 
+// ============================================
+// Main Route Handler
+// ============================================
+
 export async function POST(request: NextRequest): Promise<NextResponse<RefineResponse>> {
   try {
     const body = await request.json();
@@ -206,17 +294,17 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
           success: false,
           error: "Invalid request",
           details: "Text is required",
-          processingMode: body.processingMode || (PROCESSING_MODE as "cloud" | "local"),
+          processingMode: getEffectiveMode(body.processingMode),
         },
         { status: 400 }
       );
     }
 
-    const mode = body.mode || "developer";
-    const processingMode = body.processingMode || (PROCESSING_MODE as "cloud" | "local");
+    const refinementMode = body.mode || "developer";
+    const processingMode = getEffectiveMode(body.processingMode);
 
     // For raw mode, return text unchanged
-    if (mode === "raw") {
+    if (refinementMode === "raw") {
       return NextResponse.json({
         success: true,
         refinedText: body.text,
@@ -228,10 +316,16 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
 
     let refinedText: string;
 
-    if (processingMode === "cloud") {
-      refinedText = await refineCloud(body.text, mode);
-    } else {
-      refinedText = await refineLocal(body.text, mode);
+    switch (processingMode) {
+      case "cloud":
+        refinedText = await refineCloud(body.text, refinementMode);
+        break;
+      case "networked-local":
+      case "local":
+        refinedText = await refineOllama(body.text, refinementMode);
+        break;
+      default:
+        throw new Error(`Unknown processing mode: ${processingMode}`);
     }
 
     return NextResponse.json({
@@ -251,7 +345,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
         success: false,
         error: "Refinement failed",
         details: errorMessage,
-        processingMode: PROCESSING_MODE as "cloud" | "local",
+        processingMode: getEffectiveMode(),
       },
       { status: 500 }
     );

@@ -11,9 +11,10 @@ LocalFlow is a **voice dictation system** that lets you speak and have your word
 3. Cleans up the text (removes "um", "uh", fixes grammar)
 4. Pastes it wherever your cursor is
 
-The cool part? It works in **two modes**:
-- **Cloud Mode**: Fast, uses AI services in the cloud
-- **Local Mode**: Free, runs everything on your own computer
+The cool part? It works in **three modes**:
+- **Cloud Mode**: Fast, uses Z.AI cloud APIs (requires API key, pay-per-use)
+- **Networked Local Mode** (Default): Free, uses your own servers on your network
+- **Local Mode**: Free, everything runs on this machine (requires local setup)
 
 ---
 
@@ -86,7 +87,9 @@ Copy the example environment file:
 cp .env.example .env
 ```
 
-The default settings use "cloud" mode, which is simulated in demo mode.
+The default settings use **networked-local** mode, which requires setting up Whisper and Ollama servers (see "Networked Local Mode" section below).
+
+For the quickest start, you can use **cloud mode** if you have a Z.AI API key.
 
 ### Step 4: Start the Application
 
@@ -120,7 +123,75 @@ You should see the LocalFlow interface with a big microphone button!
 3. Click again to stop
 4. See the transcribed text appear
 
-**Note**: The demo mode returns placeholder text. For real transcription, you'll need to set up cloud or local processing (covered below).
+**Note**: You'll need to configure a processing mode for real transcription. The easiest option is Cloud Mode (requires Z.AI API key). See "Processing Modes" section below.
+
+---
+
+## Processing Modes Explained
+
+LocalFlow supports three processing modes. Choose based on your needs:
+
+| Mode | Cost | Speed | Privacy | Setup Difficulty |
+|------|------|-------|---------|------------------|
+| **Cloud** | Pay-per-use (~$0.001/request) | Fastest | Data goes to Z.AI | Easiest (just API key) |
+| **Networked Local** | Free | Fast | Private (your network) | Medium |
+| **Local** | Free | Slower | Most private | Hardest |
+
+### Recommended Setup Path
+
+1. **Start with Cloud Mode** - Get it working quickly with an API key
+2. **Move to Networked Local** - Set up your own processing server for free usage
+3. **Use Local Mode** - For single-machine setups or offline use
+
+---
+
+## Cloud Mode Setup (Easiest)
+
+Cloud mode uses Z.AI's API for both transcription and text refinement. It's the fastest to set up.
+
+### Step 1: Get a Z.AI API Key
+
+1. Go to [https://z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+2. Create an account or log in
+3. Create a new API key
+4. Copy the key (it looks like: `abc123.def456`)
+
+### Step 2: Configure Environment
+
+Edit your `.env` file:
+
+```bash
+# Set processing mode to cloud
+PROCESSING_MODE=cloud
+
+# Add your API key
+ZAI_API_KEY=your_api_key_here
+```
+
+### Step 3: Test It
+
+1. Start LocalFlow: `bun run dev:all`
+2. Open http://localhost:3000
+3. Click the microphone and speak
+4. Your speech should be transcribed!
+
+### Cloud Mode Pricing
+
+Z.AI charges per request:
+- **Transcription (GLM-ASR-2512)**: ~$0.0005 per 30-second audio
+- **Refinement (GLM-4.7-Flash)**: ~$0.0001 per 1000 tokens
+
+For typical usage (50 dictations/day), expect ~$1-2/month.
+
+### Cloud Mode Troubleshooting
+
+**"Invalid ZAI_API_KEY"**
+- Check that you copied the full API key
+- Make sure there are no extra spaces
+
+**"Rate limit exceeded"**
+- Z.AI has usage limits on free tier
+- Wait a minute and try again
 
 ---
 
@@ -254,12 +325,14 @@ You need to grant permissions:
 
 ---
 
-## Setting Up Local Mode (Advanced)
+## Setting Up Same-Machine Local Mode (Advanced)
 
-Local mode processes everything on your computer - no cloud services needed! This is great because:
+This mode processes everything on your computer - no cloud services or network needed! This is great because:
 - **It's free** - no API costs
 - **It's private** - your voice never leaves your machine
 - **It works offline** - no internet required after setup
+
+**Note:** For running processing on a separate, more powerful machine, see "Networked Local Mode" below.
 
 ### What You Need:
 1. **Ollama** - Runs AI language models locally (for text refinement)
@@ -666,8 +739,8 @@ On your **client machine** (the laptop/computer you'll use LocalFlow on):
 
 **Edit `.env`:**
 ```bash
-# Processing mode
-PROCESSING_MODE=local
+# Processing mode (networked-local uses remote Whisper/Ollama servers)
+PROCESSING_MODE=networked-local
 
 # Point to your processing machine (use its IP address)
 WHISPER_API_URL=http://192.168.1.100:8080

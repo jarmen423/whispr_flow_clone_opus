@@ -4,29 +4,48 @@ import { execSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 
-// Environment configuration
-const PROCESSING_MODE = process.env.PROCESSING_MODE || "cloud";
+// ============================================
+// Environment Configuration
+// ============================================
+
+// Processing mode: 'cloud' | 'networked-local' | 'local'
+const PROCESSING_MODE = process.env.PROCESSING_MODE || "networked-local";
+
+// Z.AI Cloud API Configuration
+const ZAI_API_KEY = process.env.ZAI_API_KEY || "";
+const ZAI_API_BASE_URL = process.env.ZAI_API_BASE_URL || "https://api.z.ai/api/paas/v4";
+const ZAI_ASR_MODEL = process.env.ZAI_ASR_MODEL || "glm-asr-2512";
+
+// Remote Whisper API Configuration (for networked-local mode)
+const WHISPER_API_URL = process.env.WHISPER_API_URL || "";
+
+// Local Whisper Binary Configuration (for local mode)
 const WHISPER_PATH = process.env.WHISPER_PATH || "/usr/local/bin/whisper";
 const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH || "./models/ggml-small-q5_1.bin";
 const WHISPER_THREADS = process.env.WHISPER_THREADS || "4";
-// Remote Whisper API URL (for networked local mode)
-// If set, uses HTTP API instead of local binary execution
-const WHISPER_API_URL = process.env.WHISPER_API_URL || "";
+
+// ============================================
+// Types
+// ============================================
 
 interface TranscribeRequest {
   audio: string; // base64-encoded audio
-  mode?: "cloud" | "local";
+  mode?: "cloud" | "networked-local" | "local";
 }
 
 interface TranscribeResponse {
   success: boolean;
   text?: string;
   wordCount?: number;
-  mode?: "cloud" | "local";
+  mode?: "cloud" | "networked-local" | "local";
   processingTime?: number;
   error?: string;
   details?: string;
 }
+
+// ============================================
+// Utilities
+// ============================================
 
 /**
  * Validate incoming transcription request
@@ -34,19 +53,20 @@ interface TranscribeResponse {
 function validateRequest(data: unknown): data is TranscribeRequest {
   if (!data || typeof data !== "object") return false;
   const req = data as Record<string, unknown>;
-  
+
   if (!req.audio || typeof req.audio !== "string") {
     return false;
   }
-  
+
+  // Max 5MB base64 (approximately 3.75MB raw audio)
   if (req.audio.length > 5_000_000) {
     throw new Error("Audio too large (max 5MB)");
   }
-  
-  if (req.mode && !["cloud", "local"].includes(req.mode as string)) {
+
+  if (req.mode && !["cloud", "networked-local", "local"].includes(req.mode as string)) {
     throw new Error("Invalid processing mode");
   }
-  
+
   return true;
 }
 
@@ -58,38 +78,127 @@ function countWords(text: string): number {
 }
 
 /**
- * Cloud transcription using browser-based Web Speech API simulation
- * In production, this would use z-ai-web-dev-sdk or similar
+ * Determine effective processing mode based on configuration
  */
-async function transcribeCloud(_audioBase64: string): Promise<{ text: string; processingTime: number }> {
-  const startTime = Date.now();
-  
-  // In a real implementation, you would use:
-  // import { ZAI } from "z-ai-web-dev-sdk";
-  // const zai = new ZAI();
-  // const result = await zai.audio.asr.create({ file_base64: audioBase64 });
-  
-  // For demo purposes, we'll simulate the API call
-  // This is where you'd integrate with your actual cloud ASR service
-  
-  // Simulate network latency
-  await new Promise(resolve => setTimeout(resolve, 500));
-  
-  // Return simulated transcription
-  // In production, replace this with actual API call
-  const text = "This is a demo transcription. Replace this with actual cloud ASR integration.";
-  
-  return {
-    text,
-    processingTime: Date.now() - startTime,
-  };
+function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" | "local" {
+  const mode = requestedMode || PROCESSING_MODE;
+
+  // Cloud mode requires API key
+  if (mode === "cloud") {
+    if (!ZAI_API_KEY) {
+      console.warn("[Transcribe] Cloud mode requested but ZAI_API_KEY not set, falling back to networked-local");
+      return WHISPER_API_URL ? "networked-local" : "local";
+    }
+    return "cloud";
+  }
+
+  // Networked-local mode requires WHISPER_API_URL
+  if (mode === "networked-local") {
+    if (!WHISPER_API_URL) {
+      console.warn("[Transcribe] Networked-local mode requested but WHISPER_API_URL not set, falling back to local");
+      return "local";
+    }
+    return "networked-local";
+  }
+
+  return "local";
 }
 
+// ============================================
+// Cloud Transcription (Z.AI API)
+// ============================================
+
 /**
- * Remote transcription using Whisper.cpp HTTP API server
- * This is used when WHISPER_API_URL is set (networked local mode)
+ * Transcribe audio using Z.AI GLM-ASR-2512 API
+ * API Docs: https://docs.z.ai/api-reference/audio/audio-transcriptions
  */
-async function transcribeRemoteWhisper(audioBase64: string): Promise<{ text: string }> {
+async function transcribeCloud(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+  const startTime = Date.now();
+
+  if (!ZAI_API_KEY) {
+    throw new Error(
+      "ZAI_API_KEY is required for cloud mode. " +
+      "Get your API key from: https://z.ai/manage-apikey/apikey-list"
+    );
+  }
+
+  try {
+    // Z.AI ASR API accepts file_base64 for base64-encoded audio
+    const response = await fetch(`${ZAI_API_BASE_URL}/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ZAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: ZAI_ASR_MODEL,
+        file_base64: audioBase64,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(60000), // 60 second timeout
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      
+      // Handle common error cases
+      if (response.status === 401) {
+        throw new Error("Invalid ZAI_API_KEY. Check your API key at https://z.ai/manage-apikey/apikey-list");
+      }
+      if (response.status === 429) {
+        throw new Error("Z.AI rate limit exceeded. Please try again later.");
+      }
+      if (response.status === 400 && errorText.includes("duration")) {
+        throw new Error("Audio too long. Maximum duration is 30 seconds.");
+      }
+      
+      throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    // Z.AI ASR returns { text: "transcribed text", ... }
+    const text = result.text || "";
+
+    if (!text.trim()) {
+      throw new Error("No speech detected in audio");
+    }
+
+    return {
+      text: text.trim(),
+      processingTime: Date.now() - startTime,
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || error.message.includes("timeout")) {
+        throw new Error("Z.AI API request timed out (60s limit)");
+      }
+      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+        throw new Error("Failed to connect to Z.AI API. Check your internet connection.");
+      }
+      throw error;
+    }
+    throw new Error("Unknown error during cloud transcription");
+  }
+}
+
+// ============================================
+// Networked Local Transcription (Remote Whisper Server)
+// ============================================
+
+/**
+ * Transcribe using remote Whisper.cpp HTTP API server
+ */
+async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+  const startTime = Date.now();
+
+  if (!WHISPER_API_URL) {
+    throw new Error(
+      "WHISPER_API_URL is required for networked-local mode. " +
+      "Set it to your whisper.cpp server URL (e.g., http://192.168.1.100:8080)"
+    );
+  }
+
   try {
     // Test connection first
     const healthCheck = await fetch(`${WHISPER_API_URL}/health`, {
@@ -98,13 +207,12 @@ async function transcribeRemoteWhisper(audioBase64: string): Promise<{ text: str
     }).catch(() => null);
 
     if (!healthCheck || !healthCheck.ok) {
-      // Try the inference endpoint directly if health check fails
       console.log("[Whisper API] Health check not available, trying inference directly");
     }
 
     // Decode base64 to binary
     const audioBuffer = Buffer.from(audioBase64, "base64");
-    
+
     // Create form data with the audio file
     const formData = new FormData();
     const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
@@ -124,15 +232,18 @@ async function transcribeRemoteWhisper(audioBase64: string): Promise<{ text: str
     }
 
     const result = await response.json();
-    
+
     // Handle different response formats from whisper.cpp server
     const text = result.text || result.transcription || result.result || "";
-    
+
     if (!text.trim()) {
       throw new Error("No speech detected in audio");
     }
 
-    return { text: text.trim() };
+    return {
+      text: text.trim(),
+      processingTime: Date.now() - startTime,
+    };
   } catch (error) {
     if (error instanceof Error) {
       if (error.name === "AbortError" || error.message.includes("timeout")) {
@@ -146,14 +257,20 @@ async function transcribeRemoteWhisper(audioBase64: string): Promise<{ text: str
       }
       throw error;
     }
-    throw new Error("Unknown error during remote transcription");
+    throw new Error("Unknown error during networked transcription");
   }
 }
 
+// ============================================
+// Local Binary Transcription (Whisper.cpp)
+// ============================================
+
 /**
- * Local transcription using Whisper.cpp binary (direct execution)
+ * Transcribe using local Whisper.cpp binary
  */
-async function transcribeLocalBinary(audioBase64: string): Promise<{ text: string }> {
+async function transcribeLocalBinary(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+  const startTime = Date.now();
+
   // Verify Whisper binary exists
   if (!existsSync(WHISPER_PATH)) {
     throw new Error(
@@ -187,7 +304,7 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
 
     // Execute Whisper.cpp
     const command = `"${WHISPER_PATH}" -m "${WHISPER_MODEL_PATH}" -f "${inputPath}" -t ${WHISPER_THREADS} -otxt -of "${outputPath}"`;
-    
+
     execSync(command, {
       timeout: 60000, // 60 second timeout
       encoding: "utf-8",
@@ -209,12 +326,15 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
       throw new Error("No speech detected in audio");
     }
 
-    return { text };
+    return {
+      text,
+      processingTime: Date.now() - startTime,
+    };
   } catch (error) {
     // Cleanup on error
     try {
       if (existsSync(inputPath)) unlinkSync(inputPath);
-    } catch {}
+    } catch { /* ignore cleanup errors */ }
 
     if (error instanceof Error) {
       if (error.message.includes("ETIMEDOUT") || error.message.includes("timeout")) {
@@ -226,18 +346,9 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
   }
 }
 
-/**
- * Local transcription - routes to either remote API or local binary
- */
-async function transcribeLocal(audioBase64: string): Promise<{ text: string }> {
-  // If WHISPER_API_URL is set, use remote API (networked local mode)
-  if (WHISPER_API_URL) {
-    return transcribeRemoteWhisper(audioBase64);
-  }
-  
-  // Otherwise, use local binary execution
-  return transcribeLocalBinary(audioBase64);
-}
+// ============================================
+// Main Route Handler
+// ============================================
 
 export async function POST(request: NextRequest): Promise<NextResponse<TranscribeResponse>> {
   try {
@@ -250,20 +361,28 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transcrib
           success: false,
           error: "Invalid request",
           details: "Audio data is required",
-          mode: body.mode || PROCESSING_MODE as "cloud" | "local",
+          mode: getEffectiveMode(body.mode),
         },
         { status: 400 }
       );
     }
 
-    const mode = body.mode || (PROCESSING_MODE as "cloud" | "local");
+    const mode = getEffectiveMode(body.mode);
 
     let result: { text: string; processingTime?: number };
 
-    if (mode === "cloud") {
-      result = await transcribeCloud(body.audio);
-    } else {
-      result = await transcribeLocal(body.audio);
+    switch (mode) {
+      case "cloud":
+        result = await transcribeCloud(body.audio);
+        break;
+      case "networked-local":
+        result = await transcribeNetworkedLocal(body.audio);
+        break;
+      case "local":
+        result = await transcribeLocalBinary(body.audio);
+        break;
+      default:
+        throw new Error(`Unknown processing mode: ${mode}`);
     }
 
     return NextResponse.json({
@@ -275,15 +394,15 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transcrib
     });
   } catch (error) {
     console.error("[Transcribe] Error:", error);
-    
+
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    
+
     return NextResponse.json(
       {
         success: false,
         error: "Transcription failed",
         details: errorMessage,
-        mode: PROCESSING_MODE as "cloud" | "local",
+        mode: getEffectiveMode(),
       },
       { status: 500 }
     );
