@@ -220,16 +220,21 @@ class PasteHandler:
             log_debug(f"Copied to clipboard: {text[:50]}...")
 
             # Small delay to ensure clipboard is ready
-            time.sleep(0.05)
+            time.sleep(0.1)
 
-            # Simulate Ctrl+V (or Cmd+V on macOS)
-            if sys.platform == "darwin":
-                pyautogui.hotkey("command", "v")
-            else:
-                pyautogui.hotkey("ctrl", "v")
+            # Try to simulate paste, but continue even if it fails
+            try:
+                # Simulate Ctrl+V (or Cmd+V on macOS)
+                if sys.platform == "darwin":
+                    pyautogui.hotkey("command", "v")
+                else:
+                    pyautogui.hotkey("ctrl", "v")
+                log_info("Text pasted successfully (simulated Ctrl+V)")
+            except Exception as keystroke_error:
+                log_warning(f"Could not simulate Ctrl+V: {keystroke_error}")
+                log_info("Text copied to clipboard - press Ctrl+V manually to paste")
 
             self.last_paste_time = time.time()
-            log_info("Text pasted successfully")
             return True
 
         except Exception as e:
