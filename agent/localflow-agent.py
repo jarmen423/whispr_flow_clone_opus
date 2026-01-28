@@ -58,7 +58,7 @@ class Config:
     dtype: str = "int16"  # 16-bit PCM
 
     # Hotkey (default: Alt+V)
-    hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+v")
+    hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+z")
 
     # Processing mode
     mode: str = os.getenv(
@@ -314,6 +314,7 @@ class LocalFlowAgent:
             self.sio.connect(
                 CONFIG.websocket_url,
                 namespaces=["/agent"],
+                transports=["websocket"],
                 wait_timeout=10,
             )
             return True

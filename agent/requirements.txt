@@ -14,9 +14,13 @@ scipy>=1.10.0
 # WebSocket client
 python-socketio>=5.10.0
 python-engineio>=4.8.0
+# python-socketio requires an additional websocket client library to support websocket transport.
+websocket-client
 
 # Clipboard management
 pyperclip>=1.8.2
 
 # Keyboard simulation
 pyautogui>=0.9.54
+requests
+
