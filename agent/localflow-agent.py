@@ -17,6 +17,14 @@ Configuration:
 
 import os
 import sys
+from pathlib import Path
+
+# Load .env from project root (parent of agent directory)
+from dotenv import load_dotenv
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"[Config] Loaded environment from {env_path}")
 import time
 import base64
 import io
@@ -39,6 +47,9 @@ from pynput import keyboard
 
 # WebSocket client
 import socketio
+
+# Visual feedback overlay
+from recording_overlay import RecordingOverlay
 
 # ============================================
 # CONFIGURATION
@@ -64,7 +75,7 @@ class Config:
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )  # developer, concise, professional, raw
-    processing_mode: str = os.getenv("LOCALFLOW_PROCESSING", "cloud")  # cloud, local
+    processing_mode: str = os.getenv("PROCESSING_MODE", "networked-local")  # cloud, networked-local, local
 
     # Heartbeat interval (seconds)
     heartbeat_interval: int = 5
@@ -237,6 +248,7 @@ class LocalFlowAgent:
     def __init__(self):
         self.recorder = AudioRecorder()
         self.paste_handler = PasteHandler()
+        self.overlay = RecordingOverlay()  # Visual feedback overlay
         self.sio = socketio.Client(
             reconnection=True,
             reconnection_attempts=0,  # Infinite
@@ -254,27 +266,27 @@ class LocalFlowAgent:
         self._setup_socket_handlers()
 
     def _setup_socket_handlers(self):
-        """Configure Socket.IO event handlers"""
+        """Configure Socket.IO event handlers for /agent namespace"""
 
-        @self.sio.event
-        def connect():
+        @self.sio.on("connect", namespace="/agent")
+        def on_connect():
             self.connected = True
             log_info(f"Connected to WebSocket server: {CONFIG.websocket_url}")
 
-        @self.sio.event
-        def disconnect():
+        @self.sio.on("disconnect", namespace="/agent")
+        def on_disconnect():
             self.connected = False
             log_info("Disconnected from WebSocket server")
 
-        @self.sio.event
-        def connect_error(error):
+        @self.sio.on("connect_error", namespace="/agent")
+        def on_connect_error(error):
             log_error(f"Connection error: {error}")
 
-        @self.sio.on("connection_confirmed")
+        @self.sio.on("connection_confirmed", namespace="/agent")
         def on_connection_confirmed(data):
             log_info(f"Connection confirmed, server time: {data.get('serverTime')}")
 
-        @self.sio.on("dictation_result")
+        @self.sio.on("dictation_result", namespace="/agent")
         def on_dictation_result(data):
             """Handle transcription result from server"""
             if data.get("success"):
@@ -292,7 +304,7 @@ class LocalFlowAgent:
                 error = data.get("error", "Unknown error")
                 log_error(f"Dictation failed: {error}")
 
-        @self.sio.on("settings_update")
+        @self.sio.on("settings_update", namespace="/agent")
         def on_settings_update(data):
             """Handle settings update from server"""
             if "mode" in data:
@@ -315,6 +327,7 @@ class LocalFlowAgent:
                 CONFIG.websocket_url,
                 namespaces=["/agent"],
                 wait_timeout=10,
+                transports=["polling", "websocket"],
             )
             return True
         except Exception as e:
@@ -336,6 +349,9 @@ class LocalFlowAgent:
     def _start_recording(self):
         """Start audio recording"""
         if self.recorder.start():
+            # Show visual feedback
+            self.overlay.show()
+            
             # Notify server
             if self.connected:
                 try:
@@ -349,6 +365,9 @@ class LocalFlowAgent:
 
     def _stop_recording(self):
         """Stop recording and send audio to server"""
+        # Hide visual feedback
+        self.overlay.hide()
+        
         audio_bytes = self.recorder.stop()
 
         if audio_bytes:
@@ -376,72 +395,104 @@ class LocalFlowAgent:
                 log_error("Not connected to server")
 
     def _parse_hotkey(self, hotkey_str: str):
-        """Parse hotkey string into pynput key combination"""
+        """Parse hotkey string into pynput key combination - returns vk codes"""
         parts = hotkey_str.lower().replace("+", " ").split()
-        keys = set()
+        vk_codes = set()
 
-        key_map = {
-            "alt": keyboard.Key.alt,
-            "ctrl": keyboard.Key.ctrl,
-            "control": keyboard.Key.ctrl,
-            "cmd": keyboard.Key.cmd,
-            "command": keyboard.Key.cmd,
-            "shift": keyboard.Key.shift,
+        # Virtual key codes for modifier keys
+        vk_map = {
+            "alt": 164,  # VK_LMENU (left alt)
+            "ctrl": 162,  # VK_LCONTROL
+            "control": 162,
+            "shift": 160,  # VK_LSHIFT
         }
 
         for part in parts:
-            if part in key_map:
-                keys.add(key_map[part])
+            if part in vk_map:
+                vk_codes.add(vk_map[part])
             elif len(part) == 1:
-                keys.add(keyboard.KeyCode.from_char(part))
+                # For regular characters, use ord() to get the virtual key code
+                vk_codes.add(ord(part.upper()))
 
-        return keys
+        log_info(f"Parsed hotkey '{hotkey_str}' -> vk_codes: {vk_codes}")
+        return vk_codes
+
+    def _get_vk(self, key):
+        """Get virtual key code from a key"""
+        # Handle modifier keys with their vk codes
+        modifier_vk_map = {
+            keyboard.Key.alt_l: 164,
+            keyboard.Key.alt_r: 165,
+            keyboard.Key.alt: 164,  # Default to left alt
+            keyboard.Key.ctrl_l: 162,
+            keyboard.Key.ctrl_r: 163,
+            keyboard.Key.ctrl: 162,
+            keyboard.Key.shift: 160,
+            keyboard.Key.shift_l: 160,
+            keyboard.Key.shift_r: 161,
+        }
+        
+        if key in modifier_vk_map:
+            return modifier_vk_map[key]
+        
+        # For KeyCode objects
+        if hasattr(key, "vk") and key.vk is not None:
+            return key.vk
+        
+        # For character keys
+        if hasattr(key, "char") and key.char:
+            return ord(key.char.upper())
+        
+        return None
 
     def _setup_hotkey_listener(self):
         """Set up global hotkey listener"""
-        current_keys = set()
-        target_keys = self._parse_hotkey(self.hotkey)
+        current_vks = set()
+        target_vks = self._parse_hotkey(self.hotkey)
+        
+        # Treat left and right alt as the same
+        alt_vks = {164, 165}  # VK_LMENU, VK_RMENU
 
         def on_press(key):
             if not self.running:
                 return False
 
-            # Normalize key
-            if hasattr(key, "char") and key.char:
-                current_keys.add(keyboard.KeyCode.from_char(key.char.lower()))
-            else:
-                current_keys.add(key)
+            vk = self._get_vk(key)
+            if vk is not None:
+                # Normalize right alt to left alt for matching
+                if vk == 165:  # Right alt
+                    vk = 164  # Treat as left alt
+                current_vks.add(vk)
+
+            log_debug(f"Key pressed: {key}, vk: {vk}, current_vks: {current_vks}, target_vks: {target_vks}")
 
             # Check if hotkey combination is pressed
-            if target_keys.issubset(current_keys):
+            if target_vks.issubset(current_vks):
                 if not self.hotkey_pressed:
                     self.hotkey_pressed = True
+                    log_info("Hotkey detected! Starting recording...")
                     self._start_recording()
 
         def on_release(key):
             if not self.running:
                 return False
 
+            vk = self._get_vk(key)
+            
+            # Normalize right alt to left alt
+            if vk == 165:
+                vk = 164
+
             # Check if we need to stop recording
             if self.hotkey_pressed and self.recorder.is_recording():
-                # If any key in the combination is released, stop recording
-                if hasattr(key, "char") and key.char:
-                    released_key = keyboard.KeyCode.from_char(key.char.lower())
-                else:
-                    released_key = key
-
-                if released_key in target_keys:
+                if vk in target_vks:
                     self.hotkey_pressed = False
+                    log_info("Hotkey released! Stopping recording...")
                     self._stop_recording()
 
             # Clean up current keys
-            try:
-                if hasattr(key, "char") and key.char:
-                    current_keys.discard(keyboard.KeyCode.from_char(key.char.lower()))
-                else:
-                    current_keys.discard(key)
-            except:
-                pass
+            if vk is not None:
+                current_vks.discard(vk)
 
         # Start listener
         listener = keyboard.Listener(on_press=on_press, on_release=on_release)
