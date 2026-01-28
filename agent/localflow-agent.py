@@ -50,7 +50,7 @@ class Config:
     """Agent configuration"""
 
     # WebSocket server URL
-    websocket_url: str = os.getenv("LOCALFLOW_WS_URL", "http://localhost:3001")
+    websocket_url: str = os.getenv("LOCALFLOW_WS_URL", "http://localhost:3002")
 
     # Audio settings
     sample_rate: int = 16000  # Whisper.cpp native rate

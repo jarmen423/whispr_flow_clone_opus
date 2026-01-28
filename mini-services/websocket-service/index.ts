@@ -14,10 +14,10 @@ import { Server } from "socket.io";
 import { createServer } from "http";
 
 // Configuration
-const PORT = parseInt(process.env.WS_PORT || "3001", 10);
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://localhost:3001").split(",");
+const PORT = parseInt(process.env.WS_PORT || "3002", 10);
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3005,http://localhost:3002").split(",");
 const STALE_TIMEOUT = parseInt(process.env.WS_STALE_TIMEOUT || "30000", 10);
-const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
+const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3005";
 
 // Types
 interface AgentConnection {

@@ -196,10 +196,10 @@ OLLAMA_MODEL=llama3.2:1b
 OLLAMA_TEMPERATURE=0.1
 
 # WebSocket Service
-WS_PORT=3001
+WS_PORT=3002
 
 # Next.js
-PORT=3000
+PORT=3005
 EOF
 
     echo -e "${GREEN}.env file created${NC}"

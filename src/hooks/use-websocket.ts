@@ -33,7 +33,7 @@ export interface SettingsUpdate {
   processingMode?: "cloud" | "local";
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3002";
 
 export function useWebSocket(): UseWebSocketReturn {
   const [socket, setSocket] = useState<Socket | null>(null);
