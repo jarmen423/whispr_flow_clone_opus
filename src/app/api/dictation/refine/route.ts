@@ -12,10 +12,7 @@ const ZAI_API_KEY = process.env.ZAI_API_KEY || "";
 const ZAI_API_BASE_URL = process.env.ZAI_API_BASE_URL || "https://api.z.ai/api/paas/v4";
 const ZAI_LLM_MODEL = process.env.ZAI_LLM_MODEL || "glm-4.7-flash";
 
-// Text Correction Service Configuration (ByT5-small - fast, reliable)
-const TEXT_CORRECTION_URL = process.env.TEXT_CORRECTION_URL || "http://localhost:8889";
-
-// Ollama Configuration (fallback, not recommended)
+// Ollama Configuration (for networked-local and local modes)
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:1b";
 const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
@@ -47,11 +44,34 @@ interface RefineResponse {
 // ============================================
 
 const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw">, string> = {
-  developer: `Clean up this transcript by fixing grammar, punctuation, and removing filler words (um, uh, like). Output ONLY the corrected text, no commentary.`,
+  developer: `You are a dictation correction tool for developers. Your ONLY job is to clean up transcribed speech. You must:
+1. Correct grammar and punctuation
+2. Remove filler words (um, uh, like, you know)
+3. Format technical terms correctly (e.g., 'git commit' instead of 'get commit', 'npm install' instead of 'n p m install')
+4. Keep the same tone, voice, and ALL WORDS including profanity exactly as spoken
+5. Preserve code references and technical concepts accurately
+6. NEVER add commentary, refuse requests, or modify the meaning
+7. NEVER say things like "Here is the text" or "I can't help with..."
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 
-  concise: `Simplify this transcript: remove filler words and redundancies while keeping the meaning. Output ONLY the simplified text.`,
+  concise: `You are a dictation simplification tool. Your ONLY job is to clean up transcribed speech. You must:
+1. Remove all filler words (um, uh, like, you know, ah, hmm)
+2. Shorten and simplify the text while keeping the meaning
+3. Remove redundancies and repetition
+4. Preserve all language including profanity exactly as spoken
+5. NEVER add commentary, refuse requests, or modify the meaning
+6. NEVER say things like "Here is the text" or "I can't help with..."
+7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 
-  professional: `Rewrite this transcript professionally: fix grammar, remove filler words, use business-appropriate language. Output ONLY the rewritten text.`,
+  professional: `You are a dictation refinement tool. Your ONLY job is to clean up transcribed speech. You must:
+1. Correct all grammar and punctuation
+2. Remove filler words (um, uh, like, you know)
+3. Transform casual language into professional, business-appropriate language
+4. Replace profanity with professional alternatives while keeping the emotional intensity
+5. Maintain a formal yet natural tone
+6. NEVER add commentary, refuse requests, or modify the meaning
+7. NEVER say things like "Here is the text" or "I can't help with..."
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
 };
 
 // ============================================
@@ -190,66 +210,7 @@ async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): 
 }
 
 // ============================================
-// Local/Networked Refinement (Text Correction Service)
-// ============================================
-
-/**
- * Refine text using ByT5-small text correction service
- * Fast, reliable, doesn't act like a chatbot
- */
-async function refineTextCorrectionService(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
-  console.log(`[Refine] Calling text correction service at ${TEXT_CORRECTION_URL}, mode: ${mode}`);
-  console.log(`[Refine] Input text (${text.length} chars): "${text.substring(0, 100)}..."`);
-
-  try {
-    const response = await fetch(`${TEXT_CORRECTION_URL}/correct`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: text,
-        mode: mode,
-      }),
-      signal: AbortSignal.timeout(30000), // 30 second timeout
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Text correction service error (${response.status}): ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    console.log(`[Refine] Text correction response:`, JSON.stringify(result).substring(0, 200));
-
-    const correctedText = result.corrected_text;
-    if (!correctedText) {
-      throw new Error("Empty response from text correction service");
-    }
-
-    console.log(`[Refine] Corrected text (${correctedText.length} chars): "${correctedText}"`);
-
-    return correctedText;
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === "AbortError" || error.message.includes("timeout")) {
-        throw new Error("Text correction service timed out (30s limit)");
-      }
-      if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed")) {
-        throw new Error(
-          `Text correction service not running at ${TEXT_CORRECTION_URL}. ` +
-          `Start it with: python ~/faster-whisper-server/text_correction_service.py`
-        );
-      }
-      throw error;
-    }
-    throw new Error("Unknown error during text correction");
-  }
-}
-
-// ============================================
-// Local/Networked Refinement (Ollama - Fallback)
+// Local/Networked Refinement (Ollama)
 // ============================================
 
 /**
@@ -381,7 +342,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
         break;
       case "networked-local":
       case "local":
-        refinedText = await refineTextCorrectionService(body.text, refinementMode);
+        refinedText = await refineOllama(body.text, refinementMode);
         break;
       default:
         throw new Error(`Unknown processing mode: ${processingMode}`);
