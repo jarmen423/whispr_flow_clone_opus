@@ -534,6 +534,276 @@ OLLAMA_MODEL=llama3.2:1b
 
 ---
 
+## Networked Local Mode (Advanced)
+
+If you have a dedicated processing machine (like a gaming PC with a powerful GPU), you can run Whisper and Ollama on that machine while using LocalFlow from any other computer on your network. This is perfect if:
+
+- Your main laptop is lightweight/battery-focused
+- You have a powerful desktop that sits unused
+- You want multiple computers to share one AI processing server
+
+### Network Setup Overview
+
+```
+┌─────────────────────────┐         ┌─────────────────────────┐
+│   CLIENT MACHINE        │         │   PROCESSING MACHINE    │
+│   (Your laptop)         │         │   (Powerful desktop)    │
+│                         │  HTTP   │                         │
+│   LocalFlow App ────────┼────────►│   Whisper.cpp Server    │
+│   (bun run dev:all)     │         │   (port 8080)           │
+│                         │  HTTP   │                         │
+│                    ─────┼────────►│   Ollama Server         │
+│                         │         │   (port 11434)          │
+└─────────────────────────┘         └─────────────────────────┘
+          │                                    │
+          └────────── Same Network ────────────┘
+                   (e.g., 192.168.1.x)
+```
+
+### Step 1: Find Your Processing Machine's IP Address
+
+On the **processing machine**, find its local IP:
+
+**Linux:**
+```bash
+ip addr show | grep "inet " | grep -v 127.0.0.1
+# Look for something like: inet 192.168.1.100/24
+```
+
+**macOS:**
+```bash
+ipconfig getifaddr en0
+# Returns something like: 192.168.1.100
+```
+
+**Windows (PowerShell):**
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"} | Select IPAddress
+# Look for something like: 192.168.1.100
+```
+
+Write down this IP address - you'll need it!
+
+### Step 2: Set Up Ollama for Remote Access
+
+By default, Ollama only listens on localhost. Configure it to accept remote connections:
+
+**Linux/macOS:**
+```bash
+# Start Ollama with remote access enabled
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+To make this permanent, create a systemd service or startup script:
+```bash
+# Create a startup script
+echo 'OLLAMA_HOST=0.0.0.0 ollama serve' > ~/start-ollama-server.sh
+chmod +x ~/start-ollama-server.sh
+```
+
+**Windows:**
+Set an environment variable before running Ollama:
+```powershell
+$env:OLLAMA_HOST = "0.0.0.0"
+ollama serve
+```
+
+**Verify it's accessible:**
+From your **client machine**, test the connection:
+```bash
+curl http://192.168.1.100:11434/api/tags
+# Should return JSON with your models
+```
+
+### Step 3: Set Up Whisper.cpp Server
+
+Whisper.cpp includes a server mode that accepts HTTP requests. This is different from the command-line binary.
+
+**Build the Whisper.cpp Server:**
+```bash
+cd whisper.cpp
+
+# Build the server (Linux/macOS)
+make server
+
+# The server binary will be at: ./server
+```
+
+**Windows:**
+```powershell
+cd whisper.cpp
+cmake -B build
+cmake --build build --config Release --target server
+# Server will be at: build\bin\Release\server.exe
+```
+
+**Start the Whisper Server:**
+```bash
+cd whisper.cpp
+
+# Start server on all interfaces, port 8080
+./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
+
+# With more threads for faster processing:
+./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8
+```
+
+You should see:
+```
+whisper_server: running on http://0.0.0.0:8080
+```
+
+**Verify it's accessible:**
+From your **client machine**:
+```bash
+curl http://192.168.1.100:8080/
+# Should return server info
+```
+
+### Step 4: Configure LocalFlow Client
+
+On your **client machine** (the laptop/computer you'll use LocalFlow on):
+
+**Edit `.env`:**
+```bash
+# Processing mode
+PROCESSING_MODE=local
+
+# Point to your processing machine (use its IP address)
+WHISPER_API_URL=http://192.168.1.100:8080
+OLLAMA_URL=http://192.168.1.100:11434
+OLLAMA_MODEL=llama3.2:1b
+
+# Local whisper settings are not needed when using remote server
+# (WHISPER_PATH and WHISPER_MODEL_PATH are ignored when WHISPER_API_URL is set)
+```
+
+### Step 5: Test Networked Mode
+
+1. **On the processing machine**, ensure both servers are running:
+   ```bash
+   # Terminal 1
+   OLLAMA_HOST=0.0.0.0 ollama serve
+   
+   # Terminal 2
+   cd whisper.cpp
+   ./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
+   ```
+
+2. **On the client machine**, start LocalFlow:
+   ```bash
+   bun run dev:all
+   ```
+
+3. **Open the web UI** at http://localhost:3000
+
+4. **Record and transcribe!** The audio will be sent to your processing machine.
+
+### Firewall Configuration
+
+If connections fail, you may need to open firewall ports on the **processing machine**:
+
+**Linux (ufw):**
+```bash
+sudo ufw allow 8080/tcp    # Whisper server
+sudo ufw allow 11434/tcp   # Ollama
+```
+
+**Linux (firewalld):**
+```bash
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --permanent --add-port=11434/tcp
+sudo firewall-cmd --reload
+```
+
+**Windows:**
+```powershell
+# Run PowerShell as Administrator
+New-NetFirewallRule -DisplayName "Whisper Server" -Direction Inbound -Port 8080 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "Ollama Server" -Direction Inbound -Port 11434 -Protocol TCP -Action Allow
+```
+
+**macOS:**
+macOS firewall usually allows outgoing connections. If prompted, allow the applications.
+
+### Troubleshooting Networked Mode
+
+**"Connection refused" or "Cannot connect"**
+- Verify the processing machine IP is correct
+- Check that both servers are running on the processing machine
+- Test connectivity: `ping 192.168.1.100`
+- Check firewall rules
+
+**"Whisper server not responding"**
+- Make sure you built and ran `server`, not `main`
+- Verify port 8080 is open: `curl http://192.168.1.100:8080/`
+
+**"Ollama not responding remotely but works locally"**
+- Ensure Ollama was started with `OLLAMA_HOST=0.0.0.0`
+- Restart Ollama with the correct environment variable
+
+**Slow performance over network**
+- Audio files are typically small (< 1MB), so network shouldn't be the bottleneck
+- Check if the processing machine is under heavy load
+- Consider using a smaller Whisper model
+
+### Security Considerations
+
+This setup is designed for **trusted home/local networks**. If you're on an untrusted network:
+
+- **Don't expose these ports to the internet** - no authentication is required
+- Consider using SSH tunnels for secure remote access:
+  ```bash
+  # From client machine, create secure tunnel to processing machine
+  ssh -L 8080:localhost:8080 -L 11434:localhost:11434 user@192.168.1.100
+  
+  # Then use localhost in your .env
+  WHISPER_API_URL=http://localhost:8080
+  OLLAMA_URL=http://localhost:11434
+  ```
+
+### Creating Startup Scripts (Optional)
+
+For convenience, create scripts to start both services on the processing machine:
+
+**Linux/macOS - `start-localflow-server.sh`:**
+```bash
+#!/bin/bash
+echo "Starting LocalFlow Processing Server..."
+
+# Start Ollama in background
+OLLAMA_HOST=0.0.0.0 ollama serve &
+OLLAMA_PID=$!
+echo "Ollama started (PID: $OLLAMA_PID)"
+
+# Wait for Ollama to be ready
+sleep 3
+
+# Start Whisper server
+cd ~/whisper.cpp
+./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8 &
+WHISPER_PID=$!
+echo "Whisper server started (PID: $WHISPER_PID)"
+
+echo ""
+echo "Processing server is ready!"
+echo "Ollama: http://$(hostname -I | awk '{print $1}'):11434"
+echo "Whisper: http://$(hostname -I | awk '{print $1}'):8080"
+echo ""
+echo "Press Ctrl+C to stop"
+
+# Wait for interrupt
+trap "kill $OLLAMA_PID $WHISPER_PID 2>/dev/null; exit" INT
+wait
+```
+
+Make it executable:
+```bash
+chmod +x start-localflow-server.sh
+```
+
+---
+
 ## Key Concepts to Learn From This Project
 
 ### 1. **React & Next.js**

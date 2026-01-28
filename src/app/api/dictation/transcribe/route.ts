@@ -9,6 +9,9 @@ const PROCESSING_MODE = process.env.PROCESSING_MODE || "cloud";
 const WHISPER_PATH = process.env.WHISPER_PATH || "/usr/local/bin/whisper";
 const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH || "./models/ggml-small-q5_1.bin";
 const WHISPER_THREADS = process.env.WHISPER_THREADS || "4";
+// Remote Whisper API URL (for networked local mode)
+// If set, uses HTTP API instead of local binary execution
+const WHISPER_API_URL = process.env.WHISPER_API_URL || "";
 
 interface TranscribeRequest {
   audio: string; // base64-encoded audio
@@ -83,9 +86,74 @@ async function transcribeCloud(_audioBase64: string): Promise<{ text: string; pr
 }
 
 /**
- * Local transcription using Whisper.cpp
+ * Remote transcription using Whisper.cpp HTTP API server
+ * This is used when WHISPER_API_URL is set (networked local mode)
  */
-async function transcribeLocal(audioBase64: string): Promise<{ text: string }> {
+async function transcribeRemoteWhisper(audioBase64: string): Promise<{ text: string }> {
+  try {
+    // Test connection first
+    const healthCheck = await fetch(`${WHISPER_API_URL}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null);
+
+    if (!healthCheck || !healthCheck.ok) {
+      // Try the inference endpoint directly if health check fails
+      console.log("[Whisper API] Health check not available, trying inference directly");
+    }
+
+    // Decode base64 to binary
+    const audioBuffer = Buffer.from(audioBase64, "base64");
+    
+    // Create form data with the audio file
+    const formData = new FormData();
+    const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
+    formData.append("file", audioBlob, "audio.wav");
+    formData.append("response_format", "json");
+
+    // Call the Whisper API server
+    const response = await fetch(`${WHISPER_API_URL}/inference`, {
+      method: "POST",
+      body: formData,
+      signal: AbortSignal.timeout(60000), // 60 second timeout
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      throw new Error(`Whisper API error (${response.status}): ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    // Handle different response formats from whisper.cpp server
+    const text = result.text || result.transcription || result.result || "";
+    
+    if (!text.trim()) {
+      throw new Error("No speech detected in audio");
+    }
+
+    return { text: text.trim() };
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || error.message.includes("timeout")) {
+        throw new Error(`Whisper API request timed out (60s limit). Server: ${WHISPER_API_URL}`);
+      }
+      if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed")) {
+        throw new Error(
+          `Cannot connect to Whisper API at ${WHISPER_API_URL}. ` +
+          `Make sure the whisper.cpp server is running: ./server -m model.bin --host 0.0.0.0 --port 8080`
+        );
+      }
+      throw error;
+    }
+    throw new Error("Unknown error during remote transcription");
+  }
+}
+
+/**
+ * Local transcription using Whisper.cpp binary (direct execution)
+ */
+async function transcribeLocalBinary(audioBase64: string): Promise<{ text: string }> {
   // Verify Whisper binary exists
   if (!existsSync(WHISPER_PATH)) {
     throw new Error(
@@ -156,6 +224,19 @@ async function transcribeLocal(audioBase64: string): Promise<{ text: string }> {
     }
     throw new Error("Unknown error during local transcription");
   }
+}
+
+/**
+ * Local transcription - routes to either remote API or local binary
+ */
+async function transcribeLocal(audioBase64: string): Promise<{ text: string }> {
+  // If WHISPER_API_URL is set, use remote API (networked local mode)
+  if (WHISPER_API_URL) {
+    return transcribeRemoteWhisper(audioBase64);
+  }
+  
+  // Otherwise, use local binary execution
+  return transcribeLocalBinary(audioBase64);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse<TranscribeResponse>> {
