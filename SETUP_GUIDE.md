@@ -12,6 +12,7 @@ LocalFlow is a **voice dictation system** that lets you speak and have your word
 4. Pastes it wherever your cursor is
 
 The cool part? It works in **three modes**:
+
 - **Cloud Mode**: Fast, uses Z.AI cloud APIs (requires API key, pay-per-use)
 - **Networked Local Mode** (Default): Free, uses your own servers on your network
 - **Local Mode**: Free, everything runs on this machine (requires local setup)
@@ -23,6 +24,7 @@ The cool part? It works in **three modes**:
 Before we start, make sure you have these installed:
 
 ### 1. Bun (JavaScript Runtime)
+
 Bun is a fast JavaScript runtime like Node.js, but faster. Install it:
 
 ```bash
@@ -34,12 +36,14 @@ powershell -c "irm bun.sh/install.ps1|iex"
 ```
 
 Verify it works:
+
 ```bash
 bun --version
 # Should print something like: 1.x.x
 ```
 
 ### 2. Python 3.7+
+
 The desktop agent is written in Python. Check if you have it:
 
 ```bash
@@ -49,12 +53,15 @@ python --version
 ```
 
 If not installed:
+
 - **macOS**: `brew install python`
 - **Ubuntu/Debian**: `sudo apt install python3 python3-pip`
 - **Windows**: Download from [python.org](https://www.python.org/downloads/)
 
 ### 3. Git (optional but recommended)
+
 For version control. Most systems have it, check with:
+
 ```bash
 git --version
 ```
@@ -96,16 +103,19 @@ For the quickest start, you can use **cloud mode** if you have a Z.AI API key.
 Open **two terminal windows**:
 
 **Terminal 1 - Web Application:**
+
 ```bash
 bun run dev
 ```
 
 **Terminal 2 - WebSocket Service:**
+
 ```bash
 bun run dev:ws
 ```
 
 Or use this single command to run both:
+
 ```bash
 bun run dev:all
 ```
@@ -131,11 +141,11 @@ You should see the LocalFlow interface with a big microphone button!
 
 LocalFlow supports three processing modes. Choose based on your needs:
 
-| Mode | Cost | Speed | Privacy | Setup Difficulty |
-|------|------|-------|---------|------------------|
-| **Cloud** | Pay-per-use (~$0.001/request) | Fastest | Data goes to Z.AI | Easiest (just API key) |
-| **Networked Local** | Free | Fast | Private (your network) | Medium |
-| **Local** | Free | Slower | Most private | Hardest |
+| Mode                | Cost                          | Speed   | Privacy                | Setup Difficulty       |
+| ------------------- | ----------------------------- | ------- | ---------------------- | ---------------------- |
+| **Cloud**           | Pay-per-use (~$0.001/request) | Fastest | Data goes to Z.AI      | Easiest (just API key) |
+| **Networked Local** | Free                          | Fast    | Private (your network) | Medium                 |
+| **Local**           | Free                          | Slower  | Most private           | Hardest                |
 
 ### Recommended Setup Path
 
@@ -178,6 +188,7 @@ ZAI_API_KEY=your_api_key_here
 ### Cloud Mode Pricing
 
 Z.AI charges per request:
+
 - **Transcription (GLM-ASR-2512)**: ~$0.0005 per 30-second audio
 - **Refinement (GLM-4.7-Flash)**: ~$0.0001 per 1000 tokens
 
@@ -186,10 +197,12 @@ For typical usage (50 dictations/day), expect ~$1-2/month.
 ### Cloud Mode Troubleshooting
 
 **"Invalid ZAI_API_KEY"**
+
 - Check that you copied the full API key
 - Make sure there are no extra spaces
 
 **"Rate limit exceeded"**
+
 - Z.AI has usage limits on free tier
 - Wait a minute and try again
 
@@ -265,6 +278,7 @@ Here's how the pieces fit together:
 ```
 
 ### Flow:
+
 1. **User speaks** into microphone
 2. **Audio captured** by browser or desktop agent
 3. **Sent to API** for transcription
@@ -286,6 +300,7 @@ pip install pynput sounddevice scipy python-socketio pyperclip pyautogui numpy
 ```
 
 Or install them all at once:
+
 ```bash
 pip install pynput sounddevice scipy python-socketio pyperclip pyautogui numpy
 ```
@@ -297,6 +312,7 @@ python localflow-agent.py
 ```
 
 You should see:
+
 ```
 ============================================
 LocalFlow Desktop Agent
@@ -319,7 +335,9 @@ Press Ctrl+C to exit.
 5. Text appears where your cursor is!
 
 ### macOS Note:
+
 You need to grant permissions:
+
 - **System Preferences → Security & Privacy → Privacy**
 - Enable for: Microphone, Accessibility
 
@@ -328,6 +346,7 @@ You need to grant permissions:
 ## Setting Up Same-Machine Local Mode (Advanced)
 
 This mode processes everything on your computer - no cloud services or network needed! This is great because:
+
 - **It's free** - no API costs
 - **It's private** - your voice never leaves your machine
 - **It works offline** - no internet required after setup
@@ -335,17 +354,20 @@ This mode processes everything on your computer - no cloud services or network n
 **Note:** For running processing on a separate, more powerful machine, see "Networked Local Mode" below.
 
 ### What You Need:
+
 1. **Ollama** - Runs AI language models locally (for text refinement)
 2. **Whisper.cpp** - Speech-to-text on your machine (for transcription)
 
 ### Automatic Setup (Recommended):
 
 Run the setup script (Linux/macOS only):
+
 ```bash
 ./scripts/setup-local.sh
 ```
 
 This will automatically:
+
 - Install Ollama
 - Download the `llama3.2:1b` language model
 - Build Whisper.cpp from source
@@ -354,7 +376,7 @@ This will automatically:
 
 ---
 
-### Manual Setup
+#### Manual Setup
 
 If the script doesn't work or you're on Windows, follow these steps:
 
@@ -367,6 +389,7 @@ Ollama runs large language models locally. We use it to clean up transcribed tex
 ### Download & Install Ollama:
 
 **macOS:**
+
 ```bash
 # Option 1: Homebrew (recommended)
 brew install ollama
@@ -376,11 +399,13 @@ brew install ollama
 ```
 
 **Linux:**
+
 ```bash
 curl -fsSL https://ollama.ai/install.sh | sh
 ```
 
 **Windows:**
+
 1. Go to [https://ollama.ai/download](https://ollama.ai/download)
 2. Download the Windows installer
 3. Run the installer and follow the prompts
@@ -436,6 +461,7 @@ Whisper.cpp is a fast, local speech recognition engine.
 ### Option A: Download Pre-built Binary (Easiest)
 
 **macOS (Apple Silicon M1/M2/M3):**
+
 ```bash
 # Download the latest release
 curl -L -o whisper.zip https://github.com/ggerganov/whisper.cpp/releases/download/v1.5.4/whisper-blas-bin-x64.zip
@@ -445,6 +471,7 @@ curl -L -o whisper.zip https://github.com/ggerganov/whisper.cpp/releases/downloa
 ```
 
 **Windows:**
+
 1. Go to [https://github.com/ggerganov/whisper.cpp/releases](https://github.com/ggerganov/whisper.cpp/releases)
 2. Download `whisper-bin-x64.zip` (for 64-bit Windows)
 3. Extract the ZIP file
@@ -469,6 +496,7 @@ make
 ```
 
 **Windows (with Visual Studio):**
+
 ```powershell
 git clone https://github.com/ggerganov/whisper.cpp.git
 cd whisper.cpp
@@ -483,6 +511,7 @@ cmake --build build --config Release
 Whisper needs a model file to work. Download one:
 
 **Using the built-in script (Linux/macOS):**
+
 ```bash
 cd whisper.cpp
 ./models/download-ggml-model.sh small
@@ -491,6 +520,7 @@ cd whisper.cpp
 **Manual download (All platforms):**
 
 Download from HuggingFace:
+
 - **Tiny** (75MB, fastest, least accurate): 
   [ggml-tiny.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin)
 - **Small** (466MB, recommended balance):
@@ -499,6 +529,7 @@ Download from HuggingFace:
   [ggml-medium.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin)
 
 Or use quantized models (smaller, nearly same quality):
+
 - **Small Q5** (190MB, recommended):
   [ggml-small-q5_1.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin)
 
@@ -512,6 +543,7 @@ Or use quantized models (smaller, nearly same quality):
 | `large` | 3GB | Slow | Best | When accuracy is critical |
 
 Save the model file to the `models/` folder in your LocalFlow project:
+
 ```bash
 mkdir -p models
 mv ~/Downloads/ggml-small-q5_1.bin ./models/
@@ -520,6 +552,7 @@ mv ~/Downloads/ggml-small-q5_1.bin ./models/
 ### Verify Whisper Works:
 
 Test with a sample audio file:
+
 ```bash
 # Create a test (record yourself or use any .wav file)
 ./whisper.cpp/main -m models/ggml-small-q5_1.bin -f test.wav
@@ -568,11 +601,13 @@ OLLAMA_MODEL=llama3.2:1b
 ## Step 4: Test Local Mode
 
 1. **Make sure Ollama is running:**
+   
    ```bash
    ollama serve
    ```
 
 2. **Start LocalFlow:**
+   
    ```bash
    bun run dev:all
    ```
@@ -586,21 +621,26 @@ OLLAMA_MODEL=llama3.2:1b
 ### Troubleshooting Local Mode:
 
 **"Whisper binary not found"**
+
 - Check that `WHISPER_PATH` in `.env` points to the actual binary
 - On Windows, make sure to use `\` or `\\` in paths
 
 **"Whisper model not found"**
+
 - Check that `WHISPER_MODEL_PATH` points to your `.bin` file
 - Make sure you downloaded the model file
 
 **"Ollama not responding"**
+
 - Make sure `ollama serve` is running in a terminal
 - Try: `curl http://localhost:11434/api/tags` - should return JSON
 
 **"Model not found" (Ollama)**
+
 - Run: `ollama pull llama3.2:1b` to download the model
 
 **Processing is slow**
+
 - Try a smaller Whisper model (`tiny` instead of `small`)
 - Try a smaller Ollama model (`llama3.2:1b` instead of `3b`)
 - Close other applications to free up RAM
@@ -638,18 +678,21 @@ If you have a dedicated processing machine (like a gaming PC with a powerful GPU
 On the **processing machine**, find its local IP:
 
 **Linux:**
+
 ```bash
 ip addr show | grep "inet " | grep -v 127.0.0.1
 # Look for something like: inet 192.168.1.100/24
 ```
 
 **macOS:**
+
 ```bash
 ipconfig getifaddr en0
 # Returns something like: 192.168.1.100
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"} | Select IPAddress
 # Look for something like: 192.168.1.100
@@ -662,12 +705,14 @@ Write down this IP address - you'll need it!
 By default, Ollama only listens on localhost. Configure it to accept remote connections:
 
 **Linux/macOS:**
+
 ```bash
 # Start Ollama with remote access enabled
 OLLAMA_HOST=0.0.0.0 ollama serve
 ```
 
 To make this permanent, create a systemd service or startup script:
+
 ```bash
 # Create a startup script
 echo 'OLLAMA_HOST=0.0.0.0 ollama serve' > ~/start-ollama-server.sh
@@ -676,6 +721,7 @@ chmod +x ~/start-ollama-server.sh
 
 **Windows:**
 Set an environment variable before running Ollama:
+
 ```powershell
 $env:OLLAMA_HOST = "0.0.0.0"
 ollama serve
@@ -683,6 +729,7 @@ ollama serve
 
 **Verify it's accessible:**
 From your **client machine**, test the connection:
+
 ```bash
 curl http://192.168.1.100:11434/api/tags
 # Should return JSON with your models
@@ -693,41 +740,51 @@ curl http://192.168.1.100:11434/api/tags
 Whisper.cpp includes a server mode that accepts HTTP requests. This is different from the command-line binary.
 
 **Build the Whisper.cpp Server:**
+
 ```bash
 cd whisper.cpp
 
-# Build the server (Linux/macOS)
-make server
+# Build using cmake (Linux/macOS)
+cmake -B build
+cmake --build build -j --config Release
 
-# The server binary will be at: ./server
+# The server binary will be at: ./build/bin/whisper-server
+
+# Optional: For better CPU performance without GPU (uses OpenBLAS)
+# cmake -B build -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+# cmake --build build -j --config Release
 ```
 
 **Windows:**
+
 ```powershell
 cd whisper.cpp
 cmake -B build
-cmake --build build --config Release --target server
-# Server will be at: build\bin\Release\server.exe
+cmake --build build --config Release
+# Server will be at: build\bin\Release\whisper-server.exe
 ```
 
 **Start the Whisper Server:**
+
 ```bash
 cd whisper.cpp
 
 # Start server on all interfaces, port 8080
-./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
+./build/bin/whisper-server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
 
-# With more threads for faster processing:
-./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8
+# With more threads for faster processing (adjust based on your CPU cores):
+./build/bin/whisper-server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8
 ```
 
 You should see:
+
 ```
 whisper_server: running on http://0.0.0.0:8080
 ```
 
 **Verify it's accessible:**
 From your **client machine**:
+
 ```bash
 curl http://192.168.1.100:8080/
 # Should return server info
@@ -738,6 +795,7 @@ curl http://192.168.1.100:8080/
 On your **client machine** (the laptop/computer you'll use LocalFlow on):
 
 **Edit `.env`:**
+
 ```bash
 # Processing mode (networked-local uses remote Whisper/Ollama servers)
 PROCESSING_MODE=networked-local
@@ -754,16 +812,18 @@ OLLAMA_MODEL=llama3.2:1b
 ### Step 5: Test Networked Mode
 
 1. **On the processing machine**, ensure both servers are running:
+   
    ```bash
    # Terminal 1
    OLLAMA_HOST=0.0.0.0 ollama serve
    
    # Terminal 2
    cd whisper.cpp
-   ./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
+   ./build/bin/whisper-server -m models/ggml-small.bin --host 0.0.0.0 --port 8080
    ```
 
 2. **On the client machine**, start LocalFlow:
+   
    ```bash
    bun run dev:all
    ```
@@ -777,12 +837,14 @@ OLLAMA_MODEL=llama3.2:1b
 If connections fail, you may need to open firewall ports on the **processing machine**:
 
 **Linux (ufw):**
+
 ```bash
 sudo ufw allow 8080/tcp    # Whisper server
 sudo ufw allow 11434/tcp   # Ollama
 ```
 
 **Linux (firewalld):**
+
 ```bash
 sudo firewall-cmd --permanent --add-port=8080/tcp
 sudo firewall-cmd --permanent --add-port=11434/tcp
@@ -790,6 +852,7 @@ sudo firewall-cmd --reload
 ```
 
 **Windows:**
+
 ```powershell
 # Run PowerShell as Administrator
 New-NetFirewallRule -DisplayName "Whisper Server" -Direction Inbound -Port 8080 -Protocol TCP -Action Allow
@@ -802,20 +865,24 @@ macOS firewall usually allows outgoing connections. If prompted, allow the appli
 ### Troubleshooting Networked Mode
 
 **"Connection refused" or "Cannot connect"**
+
 - Verify the processing machine IP is correct
 - Check that both servers are running on the processing machine
 - Test connectivity: `ping 192.168.1.100`
 - Check firewall rules
 
 **"Whisper server not responding"**
-- Make sure you built and ran `server`, not `main`
+
+- Make sure you built whisper.cpp with cmake and ran `whisper-server`, not `whisper-cli`
 - Verify port 8080 is open: `curl http://192.168.1.100:8080/`
 
 **"Ollama not responding remotely but works locally"**
+
 - Ensure Ollama was started with `OLLAMA_HOST=0.0.0.0`
 - Restart Ollama with the correct environment variable
 
 **Slow performance over network**
+
 - Audio files are typically small (< 1MB), so network shouldn't be the bottleneck
 - Check if the processing machine is under heavy load
 - Consider using a smaller Whisper model
@@ -825,7 +892,9 @@ macOS firewall usually allows outgoing connections. If prompted, allow the appli
 This setup is designed for **trusted home/local networks**. If you're on an untrusted network:
 
 - **Don't expose these ports to the internet** - no authentication is required
+
 - Consider using SSH tunnels for secure remote access:
+  
   ```bash
   # From client machine, create secure tunnel to processing machine
   ssh -L 8080:localhost:8080 -L 11434:localhost:11434 user@192.168.1.100
@@ -840,6 +909,7 @@ This setup is designed for **trusted home/local networks**. If you're on an untr
 For convenience, create scripts to start both services on the processing machine:
 
 **Linux/macOS - `start-localflow-server.sh`:**
+
 ```bash
 #!/bin/bash
 echo "Starting LocalFlow Processing Server..."
@@ -854,7 +924,7 @@ sleep 3
 
 # Start Whisper server
 cd ~/whisper.cpp
-./server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8 &
+./build/bin/whisper-server -m models/ggml-small.bin --host 0.0.0.0 --port 8080 -t 8 &
 WHISPER_PID=$!
 echo "Whisper server started (PID: $WHISPER_PID)"
 
@@ -871,6 +941,7 @@ wait
 ```
 
 Make it executable:
+
 ```bash
 chmod +x start-localflow-server.sh
 ```
@@ -880,6 +951,7 @@ chmod +x start-localflow-server.sh
 ## Key Concepts to Learn From This Project
 
 ### 1. **React & Next.js**
+
 - Server and client components
 - App Router (file-based routing)
 - API routes (serverless functions)
@@ -887,6 +959,7 @@ chmod +x start-localflow-server.sh
 Look at: `src/app/page.tsx`, `src/app/api/`
 
 ### 2. **TypeScript**
+
 - Type safety
 - Interfaces and types
 - Generics
@@ -894,6 +967,7 @@ Look at: `src/app/page.tsx`, `src/app/api/`
 Look at: `src/lib/utils.ts`, `src/hooks/use-websocket.ts`
 
 ### 3. **Real-time Communication**
+
 - WebSockets
 - Socket.IO namespaces
 - Event-driven architecture
@@ -901,6 +975,7 @@ Look at: `src/lib/utils.ts`, `src/hooks/use-websocket.ts`
 Look at: `mini-services/websocket-service/index.ts`
 
 ### 4. **UI Components**
+
 - Reusable components
 - shadcn/ui patterns
 - Tailwind CSS styling
@@ -908,6 +983,7 @@ Look at: `mini-services/websocket-service/index.ts`
 Look at: `src/components/ui/`
 
 ### 5. **Audio Processing**
+
 - Web Audio API
 - MediaRecorder
 - Binary data handling
@@ -915,6 +991,7 @@ Look at: `src/components/ui/`
 Look at: `src/app/page.tsx` (startRecording, stopRecording)
 
 ### 6. **Python System Programming**
+
 - Global hotkeys
 - Audio capture
 - Clipboard manipulation
@@ -926,6 +1003,7 @@ Look at: `agent/localflow-agent.py`
 ## Common Issues & Solutions
 
 ### "Port 3000 already in use"
+
 ```bash
 # Find what's using it
 lsof -i :3000
@@ -935,24 +1013,31 @@ kill -9 <PID>
 ```
 
 ### "WebSocket connection failed"
+
 Make sure both servers are running:
+
 ```bash
 bun run dev      # Terminal 1
 bun run dev:ws   # Terminal 2
 ```
 
 ### "Microphone permission denied"
+
 - **Chrome**: Click the camera icon in the address bar
 - **macOS**: System Preferences → Security & Privacy → Microphone
 
 ### "Python agent won't start"
+
 Install all dependencies:
+
 ```bash
 pip install pynput sounddevice scipy python-socketio pyperclip pyautogui numpy
 ```
 
 ### "Ollama not responding"
+
 Make sure it's running:
+
 ```bash
 ollama serve
 ```
@@ -962,15 +1047,19 @@ ollama serve
 ## Development Tips
 
 ### Hot Reloading
+
 Both `bun run dev` and the WebSocket service support hot reloading. Just save your changes and they'll apply automatically.
 
 ### Debugging
+
 Add console.log statements or use your browser's DevTools (F12):
+
 - **Console tab**: See logs
 - **Network tab**: See API calls
 - **Application tab**: See localStorage
 
 ### VS Code Extensions I Recommend
+
 - ESLint
 - Tailwind CSS IntelliSense
 - Python
@@ -1020,25 +1109,30 @@ Dad
 ## Quick Reference
 
 ### Start Everything
+
 ```bash
 bun run dev:all
 ```
 
 ### Start Individual Services
+
 ```bash
 bun run dev      # Web app on :3000
 bun run dev:ws   # WebSocket on :3001
 ```
 
 ### Start Desktop Agent
+
 ```bash
 cd agent
 python localflow-agent.py
 ```
 
 ### Default Hotkey
+
 `Alt + V` (hold to record, release to transcribe)
 
 ### URLs
+
 - Web UI: http://localhost:3000
 - WebSocket: ws://localhost:3001
