@@ -20,7 +20,26 @@ LocalFlow is a voice dictation system that transcribes speech to text and refine
 
 ## Common Development Commands
 
-### Starting the Application
+### Starting Everything (Recommended)
+
+The easiest way to start all services is with the automated startup script:
+
+```powershell
+.\scripts\start-all.ps1
+```
+
+This script:
+- **Auto-detects** your `PROCESSING_MODE` from `.env`
+- Opens Windows Terminal with separate tabs for each service
+- Only starts the remote LLM server when in `networked-local` mode
+
+| Mode | Services Started |
+|------|-----------------|
+| `cloud` | Node.js servers + Python agent (2 tabs) |
+| `networked-local` | Node.js servers + Python agent + Remote LLM via SSH (3 tabs) |
+| `local` | Node.js servers + Python agent (2 tabs) |
+
+### Starting the Application Manually
 
 ```bash
 # Start both Next.js app and WebSocket service (recommended)
