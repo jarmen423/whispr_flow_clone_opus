@@ -245,7 +245,7 @@ class PasteHandler:
             # Additional delay to let paste complete
             time.sleep(0.1)
 
-            self.last_paste_time = now.time()
+            self.last_paste_time = now
             log_info("Text pasted successfully")
             return True
 

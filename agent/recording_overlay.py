@@ -122,19 +122,34 @@ class RecordingOverlay:
         return self.canvas.create_polygon(points, smooth=True, **kwargs)
 
     def _animate(self):
-        """Animation loop for the waveform."""
-        while self.animation_running:
-            if self.canvas and self.is_visible:
-                try:
-                    self._draw_frame()
-                except tk.TclError:
-                    break
-            time.sleep(0.03)  # ~30 FPS
+        """Animation loop for the waveform using Tkinter's thread-safe after().
+        
+        This method schedules itself to run repeatedly using root.after(),
+        which ensures all canvas operations occur on the Tkinter main thread.
+        This avoids the 'main thread is not in main loop' RuntimeError that
+        occurs when manipulating Tkinter widgets from background threads.
+        """
+        if not self.animation_running or not self.root or not self.is_visible:
+            return
+        
+        try:
+            self._draw_frame()
+            # Schedule next frame using after() - this is thread-safe
+            self.root.after(30, self._animate)  # ~30 FPS
+        except tk.TclError:
+            # Window was destroyed, stop animating
+            pass
 
     def _draw_frame(self):
         """Draw a single animation frame."""
-        self.canvas.delete("bars")
-        self.canvas.delete("shimmer")
+        if not self.canvas:
+            return
+        
+        try:
+            self.canvas.delete("bars")
+            self.canvas.delete("shimmer")
+        except tk.TclError:
+            return  # Canvas was destroyed
         
         self.phase += 0.15
         self.shimmer_phase += 0.08
@@ -184,7 +199,12 @@ class RecordingOverlay:
         self.root.update_idletasks()
 
     def show(self):
-        """Show the overlay and start animation."""
+        """Show the overlay and start animation.
+        
+        Creates the Tkinter window in a separate thread (since Tkinter must
+        have its mainloop running) but schedules all animations via root.after()
+        to ensure thread-safe canvas operations.
+        """
         with self._lock:
             if self.is_visible:
                 return
@@ -193,15 +213,19 @@ class RecordingOverlay:
         def _show_window():
             self._create_window()
             self.animation_running = True
-            self.animation_thread = threading.Thread(target=self._animate, daemon=True)
-            self.animation_thread.start()
+            # Start animation using after() - no separate thread needed
+            self.root.after(30, self._animate)
             self.root.mainloop()
         
         # Run in a separate thread to not block
         threading.Thread(target=_show_window, daemon=True).start()
 
     def hide(self):
-        """Hide the overlay and stop animation."""
+        """Hide the overlay and stop animation.
+        
+        Schedules window destruction on the Tkinter thread to avoid
+        cross-thread Tkinter operations that cause RuntimeError.
+        """
         with self._lock:
             if not self.is_visible:
                 return
@@ -210,12 +234,21 @@ class RecordingOverlay:
         
         if self.root:
             try:
-                self.root.quit()
-                self.root.destroy()
+                # Schedule destruction on the Tkinter thread
+                def _destroy():
+                    try:
+                        self.root.quit()
+                        self.root.destroy()
+                    except:
+                        pass
+                    self.root = None
+                    self.canvas = None
+                
+                self.root.after(0, _destroy)
             except:
-                pass
-            self.root = None
-            self.canvas = None
+                # Root may already be destroyed
+                self.root = None
+                self.canvas = None
 
 
 # For testing standalone

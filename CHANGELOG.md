@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-01-29
+
+### Fixed - Recording Overlay Threading Error
+
+**Issue:** `RuntimeError: main thread is not in main loop`
+
+The recording overlay animation was causing intermittent crashes due to Tkinter threading violations.
+
+**Root Cause**
+- Tkinter canvas operations (`canvas.delete()`) were being called from a background animation thread
+- Tkinter's mainloop was running on a different thread, causing race conditions
+- When `hide()` was called, it could race with the animation thread
+
+**Solution**
+- Refactored `_animate()` to use Tkinter's thread-safe `root.after()` scheduling instead of a separate thread with `time.sleep()`
+- Added safety checks and `TclError` exception handling in `_draw_frame()`
+- Updated `hide()` to schedule window destruction on the Tkinter thread via `root.after(0, _destroy)`
+
+**Files Changed**
+- `agent/recording_overlay.py` - Rewrote animation system for thread-safety
+
+### Fixed - Paste Handler Blocking Error
+
+**Issue:** `AttributeError: 'float' object has no attribute 'time'`
+
+After transcription, pasting would fail and block the system from accepting new recordings.
+
+**Root Cause**
+- Line 248 had `self.last_paste_time = now.time()`
+- `now` is already a `float` result from `time.time()`
+- Calling `.time()` on a float raises `AttributeError`
+
+**Solution**
+- Changed `self.last_paste_time = now.time()` to `self.last_paste_time = now`
+
+**Files Changed**
+- `agent/localflow-agent.py` - Fixed line 248
+
 ## [1.2.0] - 2026-01-28
 
 ### Fixed - Agent Hotkey Detection
