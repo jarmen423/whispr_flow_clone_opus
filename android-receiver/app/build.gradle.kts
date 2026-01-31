@@ -37,6 +37,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    
+    // Workaround for Java 21 compatibility
+    tasks.withType<JavaCompile> {
+        options.isFork = false
+    }
 }
 
 dependencies {
