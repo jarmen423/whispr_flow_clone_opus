@@ -69,7 +69,7 @@ class LocalFlowClient(
      */
     fun disconnect() {
         socket?.disconnect()
-        socket = null
+        // socket = null
         Log.i(TAG, "Disconnected")
     }
 
