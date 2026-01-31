@@ -8,31 +8,44 @@ This guide shows you how to build the Android Receiver APK and share it with fri
   - Download: https://developer.android.com/studio
 - This repo cloned to your computer
 
-## Step 1: Open Project in Android Studio
+## Build Options
+
+You have two ways to build the APK:
+
+### Option 1: Terminal (Fast, No GUI) ⭐ RECOMMENDED
+
+**Prerequisites:**
+- Java JDK 17+ installed
+- Set `JAVA_HOME` environment variable
+
+**Build commands:**
+```bash
+# Navigate to android-receiver folder
+cd android-receiver
+
+# Build debug APK
+./gradlew assembleDebug
+
+# Or on Windows (if gradlew doesn't work)
+gradlew.bat assembleDebug
+```
+
+**That's it!** The APK will be built at:
+```
+android-receiver/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Option 2: Android Studio (GUI)
+
+If you prefer a graphical interface:
 
 1. Launch **Android Studio**
 2. Click **"Open"** (not "New Project")
 3. Navigate to: `[your-repo-path]/android-receiver`
 4. Click **OK**
-5. Wait for Gradle sync (2-5 minutes, progress shown in bottom bar)
-
-## Step 2: Build the APK
-
-### Method A: Using Android Studio UI
-
-1. Click **Build** in top menu bar
-2. Click **Build Bundle(s) / APK(s)**
-3. Click **Build APK(s)**
-4. Wait for build to complete (bottom status bar shows progress)
-5. When done, a notification appears in bottom-right corner
-6. Click the **"locate"** link in the notification
-
-### Method B: Using Terminal
-
-```bash
-cd android-receiver
-./gradlew assembleDebug
-```
+5. Wait for Gradle sync (2-5 minutes)
+6. Click **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)**
+7. Click the **"locate"** link when done
 
 ## Step 3: Find the APK File
 
@@ -91,15 +104,44 @@ Your friend now has the LocalFlow Receiver app installed.
 
 ## Troubleshooting
 
-### "Install blocked" error
+### Terminal Build Issues
+
+**"Command not found: ./gradlew"**
+- Make sure you're in the `android-receiver` directory
+- On Windows, use: `gradlew.bat assembleDebug`
+- Or use full path: `bash gradlew assembleDebug`
+
+**"JAVA_HOME is not set"**
+```bash
+# Mac/Linux
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
+
+# Windows (PowerShell)
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+
+# Then run build again
+./gradlew assembleDebug
+```
+
+**"Could not find or load main class"**
+- Java is not installed correctly
+- Download from: https://adoptium.net (Java 17 LTS)
+
+**Build fails with "connection timeout"**
+- Check internet connection (downloads dependencies on first build)
+- Try again: `./gradlew clean assembleDebug`
+
+### APK Installation Issues
+
+**"Install blocked" error**
 - Make sure "Unknown sources" is enabled in Android settings
 - Try enabling it specifically for the Files app
 
-### "Parse error" or "App not installed"
+**"Parse error" or "App not installed"**
 - APK may be corrupted during transfer
 - Rebuild and resend
 
-### "App from unknown developer" warning
+**"App from unknown developer" warning**
 - This is normal for sideloaded apps
 - Tap "Install anyway" or "Continue"
 
