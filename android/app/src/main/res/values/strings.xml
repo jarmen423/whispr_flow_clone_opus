@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">LocalFlow Remote</string>
+    <string name="hint_server_ip">Desktop IP (e.g., 192.168.1.100)</string>
+    <string name="btn_connect">Connect</string>
+    <string name="btn_disconnect">Disconnect</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_recording">Recording…</string>
+    <string name="status_processing">Processing…</string>
+    <string name="hold_to_record">Hold to Record</string>
+    <string name="permission_required">Microphone permission is required</string>
+    <string name="error_no_agents">No desktop agent connected</string>
+</resources>

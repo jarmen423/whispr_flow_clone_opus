@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:padding="24dp">
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/app_title"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="48dp"/>
+
+    <TextView
+        android:id="@+id/tvSubtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Remote Microphone"
+        android:textSize="14sp"
+        android:textColor="@android:color/darker_gray"
+        app:layout_constraintTop_toBottomOf="@id/tvTitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="4dp"/>
+
+    <!-- Server IP Input -->
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/tilServerIp"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:hint="@string/hint_server_ip"
+        app:layout_constraintTop_toBottomOf="@id/tvSubtitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="48dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etServerIp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            android:textColor="@android:color/white"/>
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Connect/Disconnect Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnConnect"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/btn_connect"
+        app:layout_constraintTop_toBottomOf="@id/tilServerIp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp"/>
+
+    <!-- Status Display -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/status_disconnected"
+        android:textSize="16sp"
+        android:textColor="@android:color/darker_gray"
+        app:layout_constraintTop_toBottomOf="@id/btnConnect"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="24dp"/>
+
+    <!-- Connection Indicator -->
+    <View
+        android:id="@+id/vStatusIndicator"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:background="@drawable/circle_red"
+        app:layout_constraintTop_toTopOf="@id/tvStatus"
+        app:layout_constraintBottom_toBottomOf="@id/tvStatus"
+        app:layout_constraintEnd_toStartOf="@id/tvStatus"
+        android:layout_marginEnd="8dp"/>
+
+    <!-- Record Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnRecord"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:text="@string/hold_to_record"
+        android:textSize="18sp"
+        android:textColor="@android:color/white"
+        app:cornerRadius="100dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="48dp"
+        android:enabled="false"
+        app:backgroundTint="@color/record_button_normal"/>
+
+    <!-- Recording Indicator -->
+    <ProgressBar
+        android:id="@+id/progressRecording"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/btnRecord"
+        app:layout_constraintBottom_toBottomOf="@id/btnRecord"
+        app:layout_constraintStart_toStartOf="@id/btnRecord"
+        app:layout_constraintEnd_toEndOf="@id/btnRecord"/>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

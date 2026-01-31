@@ -1,0 +1,7 @@
+<resources>
+    <color name="record_button_normal">#4CAF50</color>
+    <color name="record_button_recording">#F44336</color>
+    <color name="status_connected">#4CAF50</color>
+    <color name="status_disconnected">#F44336</color>
+    <color name="status_connecting">#FFC107</color>
+</resources>
