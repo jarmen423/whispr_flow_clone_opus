@@ -240,19 +240,19 @@ class MainActivity : AppCompatActivity(), LocalFlowClient.LocalFlowListener {
     }
 
     override fun onConnectionError(error: String) {
-        runOnUiThread {
+        lifecycleScope.launch {
             updateStatus(Status.DISCONNECTED)
-            Toast.makeText(this, "Connection error: $error", Toast.LENGTH_LONG).show()
+            Toast.makeText(this@MainActivity, "Connection error: $error", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onError(message: String) {
-        runOnUiThread {
+        lifecycleScope.launch {
             if (message.contains("No desktop agent connected")) {
                 updateStatus(Status.CONNECTED)
-                Toast.makeText(this, R.string.error_no_agents, Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, R.string.error_no_agents, Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this, "Error: $message", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Error: $message", Toast.LENGTH_LONG).show()
             }
         }
     }
