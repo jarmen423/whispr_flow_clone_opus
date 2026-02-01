@@ -1,152 +1,150 @@
-# Whispr Flow - Chromebook Receiver
+# Whispr Flow - Chromebook
 
-Receive voice transcriptions from your iPhone on a Chromebook - two ways!
+Two apps for your Chromebook:
+
+1. **Whispr Flow** - Receive transcriptions from iPhone
+2. **Whispr Chromebook** - Record directly on Chromebook (no iPhone needed)
 
 ---
 
-## 🚀 Quick Start (Linux Mode)
+## 🎤 Option 1: Whispr Flow (iPhone → Chromebook)
 
-### Prerequisites
-Enable Linux on Chromebook:
-```
-Settings → Advanced → Developers → Linux development environment → ON
-Wait for installation (~10 min)
-```
+Use this when you want to record on your iPhone and have text automatically appear on your Chromebook.
 
-### One-Time Setup
-1. Copy the `chromebook-receiver` folder to your Chromebook
-2. Open **Linux terminal**
-3. Run:
+### Setup
+
+1. **Enable Linux** on Chromebook:
+   ```
+   Settings → Advanced → Developers → Linux development environment → ON
+   Wait ~10 minutes for installation
+   ```
+
+2. **Copy this folder** to the Chromebook (Google Drive, USB, email)
+
+3. **Move to Linux files**:
+   - Open Files app
+   - Find `chromebook-receiver` folder
+   - Right-click → Cut
+   - Navigate to **Linux files** → Paste
+
+4. **Run setup** (in Linux terminal):
    ```bash
    cd ~/chromebook-receiver
    bash setup.sh
    ```
 
-### Daily Use
-You'll have **3 desktop icons**:
+5. **Done!** You now have 3 desktop icons:
 
-| Icon | Use When... |
-|------|-------------|
+| Icon | Purpose |
+|------|---------|
 | 🎤 **Whispr Flow** | Normal use - runs silently in background |
-| 🐛 **Whispr Flow (Debug)** | Something's wrong - shows live logs in terminal |
-| 📋 **Whispr Flow Logs** | Check what happened earlier - view log history |
+| 🐛 **Whispr Flow (Debug)** | Shows terminal with live logs (for troubleshooting) |
+| 📋 **Whispr Flow Logs** | View past logs if something broke |
 
-**For your friend:** Just double-click 🎤 **Whispr Flow**, then:
-1. Open Chrome to `http://localhost:3005` to see the pretty status page
-2. Note the IP address shown
-3. iPhone: Open Safari → `http://[IP]:3005/mobile`
-4. Start recording!
+### Daily Use
 
-**For you (debugging):** Double-click 🐛 **Whispr Flow (Debug)** to see live logs, or 📋 **Whispr Flow Logs** to view history.
-
----
-
-## 🌐 Web Browser Option (Alternative)
-
-Don't want Linux? Just use the browser version:
-
-1. Copy `web-clipboard-receiver.html` to Chromebook
-2. Double-click to open in Chrome
-3. Note: Still requires the Python server to be running for WebSocket
-
-**Recommendation:** Use the Linux version - it's more reliable and has better clipboard support.
+1. Double-click 🎤 **Whispr Flow**
+2. Open Chrome to `http://localhost:3005` to see IP address
+3. On iPhone: Open Safari → `http://[IP]:3005/mobile`
+4. Enter Groq API key, start recording
+5. Text automatically appears on Chromebook clipboard!
 
 ---
 
-## 🔧 How It Works
+## 🎙️ Option 2: Whispr Chromebook (Standalone)
 
-```
-iPhone (records audio → sends to Groq API → gets text)
-    ↓ WebSocket (text only)
-Chromebook (Linux receiver)
-    ↓ xclip/wl-copy
-System clipboard
-    ↓ Paste anywhere with Ctrl+V!
-```
+Use this when you **don't have your iPhone**. Records directly on Chromebook.
+
+### Setup
+
+Same steps 1-3 as above (enable Linux, copy folder, move to Linux files)
+
+4. **Run standalone setup** (in Linux terminal):
+   ```bash
+   cd ~/chromebook-receiver
+   bash setup-standalone.sh
+   ```
+
+5. **Done!** You have a new desktop icon:
+
+| Icon | Purpose |
+|------|---------|
+| 🎙️ **Whispr Chromebook** | Record and transcribe directly on Chromebook |
+
+### Daily Use
+
+1. Double-click 🎙️ **Whispr Chromebook**
+2. Enter Groq API key (first time only, saved for later)
+3. Click **START RECORDING**
+4. Speak into Chromebook microphone
+5. Click **STOP RECORDING**
+6. Text is transcribed and copied to clipboard!
+
+---
+
+## 📁 Files in this Folder
+
+| File | Purpose |
+|------|---------|
+| `linux-receiver.py` | Receiver server (WebSocket + web UI) |
+| `setup.sh` | Setup for receiver mode |
+| `view-logs.sh` | Helper to view receiver logs |
+| `web-clipboard-receiver.html` | Status page shown in browser |
+| `whispr-chromebook.py` | **NEW** Standalone recording app |
+| `setup-standalone.sh` | **NEW** Setup for standalone mode |
+| `README.md` | This file |
 
 ---
 
 ## 🐛 Troubleshooting
 
-### "Nothing happens when I click the icon"
-- Check if it's already running (look for 🎤 in system tray)
-- Click 🐛 **Whispr Flow (Debug)** to see error messages
-- Or click 📋 **Whispr Flow Logs** to check logs
+### Receiver mode (iPhone connection)
 
-### "Cannot connect from iPhone"
-- Make sure both devices are on the **same WiFi**
-- Check the IP address on the status page (`http://localhost:3005`)
-- Try refreshing the iPhone page
-- Check 🐛 Debug mode for connection messages
+**"Cannot connect from iPhone"**
+- Check both devices are on same WiFi
+- Check IP address on status page (`http://localhost:3005`)
+- Try 🐛 Debug mode to see connection messages
 
-### "Clipboard not working"
+**"Clipboard not working"**
 ```bash
-# In Linux terminal:
 sudo apt install xclip wl-clipboard
 ```
 
-### "Port already in use"
+### Standalone mode (Chromebook recording)
+
+**"No microphone detected"**
 ```bash
-# Kill existing process:
-pkill -f linux-receiver.py
-# Or check logs to see if it's already running
+sudo apt install alsa-utils
+# Test mic: arecord -l
 ```
 
-### "Permission denied"
-```bash
-# Make scripts executable:
-chmod +x ~/chromebook-receiver/*.sh
-chmod +x ~/chromebook-receiver/*.py
-```
+**"No GUI appears"**
+- Make sure you're not in a terminal-only session
+- Try running with terminal to see errors:
+  ```bash
+  python3 ~/chromebook-receiver/whispr-chromebook.py
+  ```
 
 ---
 
-## 📁 File Structure
+## 📝 Log Locations
 
-| File | Purpose |
-|------|---------|
-| `linux-receiver.py` | Main receiver (handles WebSocket + web UI) |
-| `web-clipboard-receiver.html` | Pretty status page shown in browser |
-| `setup.sh` | One-time setup - creates desktop icons |
-| `view-logs.sh` | Helper to view log files |
-| `README.md` | This file |
-
-### Log Location
 ```
-~/.local/share/whispr-flow/receiver.log
+~/.local/share/whispr-flow/receiver.log       # Receiver logs
+~/.config/whispr-flow/config.json             # Standalone app config (API key)
 ```
 
-Logs rotate automatically when they reach 5MB, keeping the last 3 backups:
-- `receiver.log` (current)
-- `receiver.log.1` (previous)
-- `receiver.log.2` (oldest)
-
-Maximum disk usage: ~20MB for logs.
+Logs rotate automatically (5MB max, 3 backups).
 
 ---
 
-## 🔄 Auto-Start (Optional)
+## 💡 Which Should I Use?
 
-To start automatically when Linux boots:
+| Situation | Use |
+|-----------|-----|
+| Have iPhone, want to walk around while talking | 🎤 **Whispr Flow** (Receiver) |
+| Don't have iPhone, at Chromebook | 🎙️ **Whispr Chromebook** (Standalone) |
+| iPhone mic is better quality | 🎤 **Whispr Flow** (Receiver) |
+| Want simplest setup (one device) | 🎙️ **Whispr Chromebook** (Standalone) |
 
-```bash
-# Add to crontab
-crontab -e
-
-# Add this line:
-@reboot sleep 10 && /usr/bin/python3 /home/USERNAME/chromebook-receiver/linux-receiver.py
-```
-
----
-
-## 📝 Notes for Developers
-
-The receiver uses:
-- **WebSocket** (port 3002) - receives text from iPhone
-- **HTTP** (port 3005) - serves status page
-- **xclip/wl-copy** - copies to system clipboard
-
-Debug mode: `python3 linux-receiver.py --debug`
-Silent mode: `python3 linux-receiver.py` (default)
-
-Logs are always written to `~/.local/share/whispr-flow/receiver.log` regardless of mode.
+**You can install both!** They work independently.

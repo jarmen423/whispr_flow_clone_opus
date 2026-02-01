@@ -1,5 +1,8 @@
 #!/bin/bash
 # Setup script for Whispr Flow Linux Receiver
+# NOTE: This is separate from setup-standalone.sh for Whispr Chromebook
+
+set -e
 
 echo "🎤 Setting up Whispr Flow Receiver..."
 
@@ -70,9 +73,9 @@ chmod +x "$DEBUG_DESKTOP"
 chmod +x "$LOGS_DESKTOP"
 
 # Also add to applications menu
- cp "$NORMAL_DESKTOP" "$HOME/.local/share/applications/whispr-flow.desktop"
- cp "$DEBUG_DESKTOP" "$HOME/.local/share/applications/whispr-flow-debug.desktop"
- cp "$LOGS_DESKTOP" "$HOME/.local/share/applications/whispr-flow-logs.desktop"
+cp "$NORMAL_DESKTOP" "$HOME/.local/share/applications/whispr-flow.desktop"
+cp "$DEBUG_DESKTOP" "$HOME/.local/share/applications/whispr-flow-debug.desktop"
+cp "$LOGS_DESKTOP" "$HOME/.local/share/applications/whispr-flow-logs.desktop"
 
 echo ""
 echo "✅ Setup complete!"
