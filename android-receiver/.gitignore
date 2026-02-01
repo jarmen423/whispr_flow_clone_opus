@@ -1,0 +1,19 @@
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Android Studio files
+*.iml
+.idea/
+*.iws
+*.ipr
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# APK files (if you want to ignore built APKs)
+# *.apk
