@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Mic, Settings, Wifi, WifiOff, Copy, Check } from "lucide-react";
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, set, push } from 'firebase/database';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -10,7 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { IOSInstallPrompt } from "./ios-install-prompt";
 
-// No WS_URL needed - connects directly to Android receiver!
+// Firebase configuration for cloud relay
+// Get these values from your Firebase project settings
+const FIREBASE_CONFIG = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
+  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || '',
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
+};
 
 interface ProcessedResult {
   text: string;
@@ -28,6 +37,10 @@ export default function MobilePage() {
   const [receiverIp, setReceiverIp] = useState("");
   const [mode, setMode] = useState<"developer" | "concise" | "professional" | "raw">("developer");
   const [showSettings, setShowSettings] = useState(false);
+  const [firebaseApiKey, setFirebaseApiKey] = useState("");
+  const [firebaseDbUrl, setFirebaseDbUrl] = useState("");
+  const [useCloudRelay, setUseCloudRelay] = useState(false);
+  const [deviceId, setDeviceId] = useState("");
   
   // Status
   const [status, setStatus] = useState<"idle" | "recording" | "processing" | "sending" | "done" | "error">("idle");
@@ -45,9 +58,24 @@ export default function MobilePage() {
     const savedKey = localStorage.getItem("localflow-groq-key");
     const savedIp = localStorage.getItem("localflow-receiver-ip");
     const savedMode = localStorage.getItem("localflow-mode") as typeof mode;
+    const savedFirebaseKey = localStorage.getItem("localflow-firebase-key");
+    const savedFirebaseDbUrl = localStorage.getItem("localflow-firebase-db-url");
+    const savedUseCloudRelay = localStorage.getItem("localflow-use-cloud-relay");
+    const savedDeviceId = localStorage.getItem("localflow-device-id");
     if (savedKey) setApiKey(savedKey);
     if (savedIp) setReceiverIp(savedIp);
     if (savedMode) setMode(savedMode);
+    if (savedFirebaseKey) setFirebaseApiKey(savedFirebaseKey);
+    if (savedFirebaseDbUrl) setFirebaseDbUrl(savedFirebaseDbUrl);
+    if (savedUseCloudRelay) setUseCloudRelay(savedUseCloudRelay === "true");
+    if (savedDeviceId) {
+      setDeviceId(savedDeviceId);
+    } else {
+      // Generate a unique device ID
+      const newDeviceId = Math.random().toString(36).substring(2, 15);
+      setDeviceId(newDeviceId);
+      localStorage.setItem("localflow-device-id", newDeviceId);
+    }
   }, []);
 
   // Save settings
@@ -55,6 +83,10 @@ export default function MobilePage() {
     localStorage.setItem("localflow-groq-key", apiKey);
     localStorage.setItem("localflow-receiver-ip", receiverIp);
     localStorage.setItem("localflow-mode", mode);
+    localStorage.setItem("localflow-firebase-key", firebaseApiKey);
+    localStorage.setItem("localflow-firebase-db-url", firebaseDbUrl);
+    localStorage.setItem("localflow-use-cloud-relay", useCloudRelay.toString());
+    localStorage.setItem("localflow-device-id", deviceId);
     setShowSettings(false);
     setErrorMessage("");
   };
@@ -240,55 +272,83 @@ export default function MobilePage() {
 
   const sendToReceiver = async (text: string, wordCount: number) => {
     setStatus("sending");
-    
-    return new Promise<void>((resolve) => {
+
+    // Use Firebase cloud relay if configured
+    if (useCloudRelay && firebaseApiKey && firebaseDbUrl) {
       try {
-        // Use standard WebSocket (not Socket.IO) to connect to Android
-        const ws = new WebSocket(`ws://${receiverIp}:3002`);
-        
-        ws.onopen = () => {
-          console.log("[Mobile] Connected to Android receiver");
-          
-          // Send the text as JSON
-          ws.send(JSON.stringify({
-            event: "paste_text",
-            data: {
-              text,
-              wordCount,
-              timestamp: Date.now(),
-            }
-          }));
-          
-          // Disconnect after sending
-          setTimeout(() => {
-            ws.close();
-            resolve();
-          }, 500);
+        const firebaseConfig = {
+          apiKey: firebaseApiKey,
+          databaseURL: firebaseDbUrl,
+          projectId: 'whispr-flow',
+          authDomain: `${firebaseApiKey?.split(':')[0]}.firebaseapp.com`,
         };
 
-        ws.onerror = (error) => {
-          console.error("[Mobile] WebSocket error:", error);
-          // Don't fail - text is still shown to user
-          resolve();
-        };
+        const app = initializeApp(firebaseConfig, 'whispr-mobile');
+        const db = getDatabase(app);
 
-        ws.onclose = () => {
-          resolve();
-        };
+        // Write to a path based on device ID
+        const transcriptionRef = ref(db, `transcriptions/${deviceId}`);
+        await set(transcriptionRef, {
+          text,
+          wordCount,
+          timestamp: Date.now(),
+          deviceId,
+        });
 
-        // Timeout
-        setTimeout(() => {
-          if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
-            ws.close();
-          }
-          resolve();
-        }, 3000);
-
+        console.log("[Mobile] Sent to Firebase cloud relay");
       } catch (error) {
-        console.error("[Mobile] Failed to send to receiver:", error);
-        resolve();
+        console.error("[Mobile] Firebase error:", error);
       }
-    });
+    }
+
+    // Also try direct WebSocket if receiver IP is configured (local network)
+    if (receiverIp) {
+      return new Promise<void>((resolve) => {
+        try {
+          const ws = new WebSocket(`ws://${receiverIp}:3002`);
+
+          ws.onopen = () => {
+            console.log("[Mobile] Connected to local receiver");
+
+            ws.send(JSON.stringify({
+              event: "paste_text",
+              data: {
+                text,
+                wordCount,
+                timestamp: Date.now(),
+              }
+            }));
+
+            setTimeout(() => {
+              ws.close();
+              resolve();
+            }, 500);
+          };
+
+          ws.onerror = (error) => {
+            console.error("[Mobile] WebSocket error:", error);
+            resolve();
+          };
+
+          ws.onclose = () => {
+            resolve();
+          };
+
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            resolve();
+          }, 3000);
+
+        } catch (error) {
+          console.error("[Mobile] Failed to send to receiver:", error);
+          resolve();
+        }
+      });
+    }
+
+    return Promise.resolve();
   };
 
   const copyToClipboard = async () => {
@@ -459,18 +519,76 @@ export default function MobilePage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="receiver-ip">Android Receiver IP (optional)</Label>
-                <Input
-                  id="receiver-ip"
-                  type="text"
-                  placeholder="192.168.1.100"
-                  value={receiverIp}
-                  onChange={(e) => setReceiverIp(e.target.value)}
-                />
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="use-cloud-relay">Use Cloud Relay (Recommended)</Label>
+                  <input
+                    id="use-cloud-relay"
+                    type="checkbox"
+                    checked={useCloudRelay}
+                    onChange={(e) => setUseCloudRelay(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                </div>
                 <p className="text-xs text-slate-400">
-                  Enter Chromebook/Android device IP for auto-paste
+                  Works from anywhere - no local network needed
                 </p>
               </div>
+
+              {useCloudRelay && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="firebase-key">Firebase API Key</Label>
+                    <Input
+                      id="firebase-key"
+                      type="password"
+                      placeholder="AIza..."
+                      value={firebaseApiKey}
+                      onChange={(e) => setFirebaseApiKey(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="firebase-db-url">Firebase Database URL</Label>
+                    <Input
+                      id="firebase-db-url"
+                      type="text"
+                      placeholder="https://your-project.firebaseio.com"
+                      value={firebaseDbUrl}
+                      onChange={(e) => setFirebaseDbUrl(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="device-id">Device ID (share with Chromebook)</Label>
+                    <Input
+                      id="device-id"
+                      type="text"
+                      value={deviceId}
+                      readOnly
+                      className="bg-slate-100"
+                    />
+                    <p className="text-xs text-slate-400">
+                      Enter this ID in the Chrome extension
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {!useCloudRelay && (
+                <div className="space-y-2">
+                  <Label htmlFor="receiver-ip">Local Receiver IP (optional)</Label>
+                  <Input
+                    id="receiver-ip"
+                    type="text"
+                    placeholder="192.168.1.100"
+                    value={receiverIp}
+                    onChange={(e) => setReceiverIp(e.target.value)}
+                  />
+                  <p className="text-xs text-slate-400">
+                    For local network only - same WiFi required
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="mode">Refinement Mode</Label>
@@ -497,9 +615,9 @@ export default function MobilePage() {
         {/* Instructions */}
         <div className="text-center text-xs text-slate-400 space-y-1">
           <p>1. Enter your Groq API key above</p>
-          <p>2. Optionally add Android receiver IP for auto-paste</p>
-          <p>3. Record audio - it goes directly to Groq</p>
-          <p>4. Text appears here and on your Android device!</p>
+          <p>2. Enable "Cloud Relay" and enter Firebase credentials</p>
+          <p>3. Share your Device ID with Chrome extension</p>
+          <p>4. Record audio - text appears on Chromebook automatically!</p>
         </div>
       </div>
     </div>

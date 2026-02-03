@@ -126,11 +126,21 @@ async def websocket_handler(websocket: WebSocketServerProtocol, path):
         async for message in websocket:
             try:
                 data = json.loads(message)
+                text = None
+
+                # Handle existing format: type == "transcription" with text at top level
                 if data.get('type') == 'transcription' and data.get('text'):
                     text = data['text']
+                # Handle iPhone format: event == "paste_text" with text nested in data.text
+                elif data.get('event') == 'paste_text' and data.get('data'):
+                    event_data = data['data']
+                    if isinstance(event_data, dict) and event_data.get('text'):
+                        text = event_data['text']
+
+                if text:
                     preview = text[:50] + ('...' if len(text) > 50 else '')
                     logger.info(f"🎤 Received: {preview}")
-                    
+
                     if copy_to_clipboard(text):
                         logger.info(f"✅ Copied to clipboard!")
                         await websocket.send(json.dumps({
