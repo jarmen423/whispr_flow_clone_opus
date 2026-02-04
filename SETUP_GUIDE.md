@@ -1060,7 +1060,13 @@ ollama serve
 5. On Windows, run agent as Administrator
 
 **Why Letter Keys Work Better:**
-As of v1.2.0, LocalFlow uses pynput's `GlobalHotKeys` class which works best with letter keys. Symbol keys like `/` and `?` share physical keys (the `/` key also produces `?` with shift), making them unreliable for hotkeys. Letter keys don't have this problem and are automatically suppressed so they won't type while Alt is held.
+As of v1.2.0, LocalFlow uses pynput with letter keys for hotkeys. Symbol keys like `/` and `?` share physical keys (the `/` key also produces `?` with shift), making them unreliable for hotkeys. Letter keys don't have this problem.
+
+**Terminal Applications:**
+In some terminal applications (PowerShell, Windows Terminal), hotkey events may occasionally leak through causing unwanted characters. The agent now suppresses hotkey events to prevent this, but if you experience repeated characters:
+- Try releasing both keys simultaneously
+- Use left Alt vs right Alt (some systems behave differently)
+- Run the agent as Administrator
 
 ### "Transcription Failed" Error
 

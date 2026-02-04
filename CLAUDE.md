@@ -378,6 +378,53 @@ This creates late binding - all lambdas reference the same variable. Solution: u
 hotkeys[combo_str] = (lambda fm=flag: self._on_hotkey_press(format_mode=fm))  # Correct
 ```
 
+**Keyboard Event Suppression for Terminal Applications**
+pynput's `GlobalHotKeys` only **detects** hotkeys - it never suppresses the underlying key events. This causes issues in terminal applications (PowerShell, Windows Terminal) where leaked key events can trigger repeat input (e.g., continuous 'm' or 'l' characters).
+
+**Evidence:**
+- `GlobalHotKeys` extends `Listener` but doesn't pass `suppress=True`
+- Detection happens via `_on_press()` which never blocks event propagation
+- Terminal emulators have different input handling that makes this more visible
+
+**Solution:** Use a single `Listener` with manual key tracking and suppress events by returning `False` from callbacks:
+
+```python
+def on_press(key):
+    # Track key state
+    pressed_keys.add(key)
+    
+    # Check for hotkey (Alt + letter)
+    if is_alt_pressed() and is_hotkey_char_pressed(target_char):
+        start_recording()
+        return False  # SUPPRESS the event - critical!
+    
+    return True  # Allow other keys
+
+def on_release(key):
+    pressed_keys.discard(key)
+    
+    if is_recording and is_hotkey_key(key):
+        stop_recording()
+        return False  # SUPPRESS release event
+    
+    return True  # Allow other keys
+
+# Create listener without GlobalHotKeys
+listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+```
+
+**Key Implementation Details:**
+- Suppress **both** press AND release events for hotkey-related keys
+- Suppress during paste operations to prevent interference
+- Use virtual key codes (`key.vk`) as fallback for character detection
+- Reset state when recording stops to handle "rollover" releases
+
+**Testing:** Always verify hotkey behavior in:
+- PowerShell (most sensitive to key leakage)
+- Windows Terminal
+- VS Code terminal
+- Regular GUI apps (should work normally)
+
 **Whisper Prompting Limitations**
 Whisper's `initial_prompt` does NOT interpret voice commands like "new line" as formatting. It uses style conditioning (continuation), not command execution. For structural formatting (lists, indentation), post-processing with an LLM is required.
 

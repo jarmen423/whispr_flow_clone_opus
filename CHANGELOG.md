@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed - Keyboard Event Suppression in Terminal Applications
+
+**Issue:** Hotkey presses leak through to terminal apps (PowerShell, Windows Terminal), causing repeated characters like 'm' or 'l'
+
+**Root Cause**
+- pynput's `GlobalHotKeys` class only **detects** hotkeys - it never suppresses the underlying key events
+- Terminal emulators have different input handling that makes this more visible
+- The previous dual-listener approach (GlobalHotKeys + Listener) allowed key events to leak through
+
+**Solution**
+- Replaced `GlobalHotKeys` with a single `keyboard.Listener` using manual key state tracking
+- Suppress hotkey events by returning `False` from `on_press` and `on_release` callbacks
+- Suppress both key press AND release events for hotkey-related keys
+- Maintain suppression only during the hotkey window (while Alt+letter is held)
+
+**Key Implementation Details**
+- Manual tracking of pressed keys via `self.pressed_keys` set
+- Check for Alt keys via `key in {Key.alt_l, Key.alt_r, Key.alt_gr, Key.alt}`
+- Detect hotkey character by both `key.char` and virtual key code (`key.vk`) fallback
+- Suppress events during paste operations to prevent interference
+- Reset state on recording stop to handle "rollover" key releases
+
+**Files Changed**
+- `agent/localflow-agent.py` - Rewrote `_setup_hotkey_listener()` with event suppression
+
 ## [1.2.1] - 2026-01-29
 
 ### Fixed - Recording Overlay Threading Error

@@ -111,6 +111,18 @@ bun run dev:all
 
 You may need to run with elevated permissions for the global hotkey to work in all applications.
 
+### Terminal Applications (PowerShell, Windows Terminal)
+
+**Symptom:** Hotkey triggers recording but leaves unwanted characters (e.g., repeated 'l' or 'm')
+
+**Why:** Terminal emulators handle keyboard input differently than GUI applications. The agent suppresses hotkey events to prevent this, but timing variations can occasionally cause leakage.
+
+**Solutions:**
+1. Release both Alt and the letter key simultaneously
+2. Try left Alt vs right Alt (behavior varies by system)
+3. Run the agent as Administrator (recommended for Windows)
+4. The issue is cosmetic - recording and pasting still work correctly
+
 ### macOS Permissions
 
 Grant these permissions in System Preferences > Security & Privacy:

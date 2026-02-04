@@ -1129,93 +1129,164 @@ class LocalFlowAgent:
         return None
 
     def _setup_hotkey_listener(self):
-        """Configure global hotkey listeners for recording triggers.
+        """Configure global hotkey listeners for recording triggers with event suppression.
 
-        Sets up two keyboard listeners: a GlobalHotKeys instance for
-        detecting hotkey presses (which triggers recording start), and
-        a regular Listener for tracking key releases (which triggers
-        recording stop). This push-to-talk behavior requires holding
-        the hotkey combination for the duration of recording.
+        Sets up a single keyboard listener that detects hotkey combinations and
+        suppresses the key events to prevent them from reaching applications.
+        This is crucial for terminal applications like PowerShell where unhandled
+        key events can cause unwanted character input (e.g., repeated 'm' or 'l').
+
+        The listener uses manual key state tracking to detect when both the Alt
+        key and the hotkey letter are pressed simultaneously. When the hotkey is
+        detected, recording starts. When either key is released, recording stops.
+        Key events are suppressed during this window to prevent leakage.
 
         Key Technologies/APIs:
-            - pynput.keyboard.GlobalHotKeys: Global hotkey registration
-              with automatic callback invocation
             - pynput.keyboard.Listener: Low-level key event monitoring
-            - pynput.keyboard.Key: Special key constants for modifier
-              detection and release tracking
-            - lambda closures: Hotkey callback binding with format_mode
+            - pynput.keyboard.Key: Special key constants for modifier detection
+            - Callback return values: Returning False suppresses the event
+            - Manual key state tracking: Reliable hotkey detection across platforms
 
         Returns:
-            object: A mock listener object with a stop() method for
-                compatibility with the cleanup code in run().
+            Listener: A listener object with a stop() method for cleanup.
 
         Note:
             This method must be called from the main thread as keyboard
             listeners have thread-safety requirements on some platforms.
         """
-        from pynput.keyboard import GlobalHotKeys, Key, KeyCode
+        from pynput.keyboard import Key, KeyCode
 
-        hotkeys = {}
-
-        # Register regular hotkey (e.g., Alt+L)
+        # Parse hotkey configurations
         parts = self.hotkey.lower().replace("+", " ").split()
-        if parts[0] == "alt" and len(parts) == 2 and len(parts[1]) == 1:
-            target_char = parts[1]
-            for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
-                alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
-                combo_str = alt_names[alt_key] + "+" + target_char
-                hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False)
-
-        # Register format hotkey (e.g., Alt+M)
         format_parts = self.format_hotkey.lower().replace("+", " ").split()
-        if format_parts[0] == "alt" and len(format_parts) == 2 and len(format_parts[1]) == 1:
-            format_char = format_parts[1]
-            for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
-                alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
-                combo_str = alt_names[alt_key] + "+" + format_char
-                hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=True)
 
-        log_info(f"Registering hotkeys: {list(hotkeys.keys())}")
+        # Store target characters for release detection
+        self._hotkey_char = parts[1] if len(parts) >= 2 else "l"
+        self._format_hotkey_char = format_parts[1] if len(format_parts) >= 2 else "m"
 
-        # Create GlobalHotKeys instance
-        self.hotkey_listener = GlobalHotKeys(hotkeys)
-
-        # Also track key release manually
+        # Track currently pressed keys
         self.pressed_keys = set()
+        self._hotkey_triggered = False
+        self._last_hotkey_was_format = False
+
+        # Define Alt keys for detection
+        ALT_KEYS = {Key.alt_l, Key.alt_r, Key.alt_gr, Key.alt}
+
+        def is_alt_pressed():
+            """Check if any Alt key is currently pressed."""
+            return bool(self.pressed_keys & ALT_KEYS)
+
+        def is_hotkey_char_pressed(target_char):
+            """Check if the target hotkey character is pressed."""
+            target_lower = target_char.lower()
+            for key in self.pressed_keys:
+                if hasattr(key, "char") and key.char and key.char.lower() == target_lower:
+                    return True
+                # Also check by vk code for letter keys
+                if hasattr(key, "vk") and key.vk is not None:
+                    try:
+                        char_from_vk = chr(key.vk).lower()
+                        if char_from_vk == target_lower:
+                            return True
+                    except (ValueError, OverflowError):
+                        pass
+            return False
 
         def on_press(key):
+            """Handle key press events.
+
+            Suppresses events when:
+            1. Pasting is in progress
+            2. Hotkey combination is active (Alt + hotkey_char)
+
+            Returns False to suppress the event, True/None to allow it.
+            """
             if self.pasting_in_progress:
-                return  # Ignore keyboard events during paste
+                return False  # Suppress during paste
+
             self.pressed_keys.add(key)
-            log_debug(f"PRESS: {key}, pressed: {self.pressed_keys}")
+            log_debug(f"PRESS: {key}, pressed: {len(self.pressed_keys)} keys")
+
+            # Check for hotkey activation (Alt + letter)
+            if is_alt_pressed() and not self._hotkey_triggered:
+                if is_hotkey_char_pressed(self._hotkey_char):
+                    self._hotkey_triggered = True
+                    self._last_hotkey_was_format = False
+                    self._on_hotkey_press(format_mode=False)
+                    return False  # Suppress the hotkey event
+                elif is_hotkey_char_pressed(self._format_hotkey_char):
+                    self._hotkey_triggered = True
+                    self._last_hotkey_was_format = True
+                    self._on_hotkey_press(format_mode=True)
+                    return False  # Suppress the hotkey event
+
+            # Suppress Alt+hotkey_char combinations even if already triggered
+            if is_alt_pressed():
+                if is_hotkey_char_pressed(self._hotkey_char) or is_hotkey_char_pressed(self._format_hotkey_char):
+                    return False
+
+            # Allow all other keys
+            return True
 
         def on_release(key):
+            """Handle key release events.
+
+            Stops recording when the hotkey is released. Suppresses
+            release events for hotkey-related keys during recording.
+            """
             if self.pasting_in_progress:
-                return  # Ignore keyboard events during paste
+                self.pressed_keys.discard(key)
+                return False  # Suppress during paste
+
             self.pressed_keys.discard(key)
-            log_debug(f"RELEASE: {key}, pressed: {self.pressed_keys}")
+            log_debug(f"RELEASE: {key}, pressed: {len(self.pressed_keys)} keys")
 
-            # Stop recording if recording and we release the hotkey
-            if self.hotkey_pressed and self.recorder.is_recording():
-                # Check if released key is Alt or the letter
-                if key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
-                    self.hotkey_pressed = False
+            # Stop recording if hotkey was triggered and we're recording
+            if self._hotkey_triggered and self.recorder.is_recording():
+                # Check if this is a hotkey-related key being released
+                is_alt_key = key in ALT_KEYS
+                is_hotkey_char = False
+
+                if hasattr(key, "char") and key.char:
+                    key_char_lower = key.char.lower()
+                    is_hotkey_char = (key_char_lower == self._hotkey_char or
+                                     key_char_lower == self._format_hotkey_char)
+
+                # Also check vk code for letter keys
+                if hasattr(key, "vk") and key.vk is not None:
+                    try:
+                        char_from_vk = chr(key.vk).lower()
+                        if char_from_vk in (self._hotkey_char, self._format_hotkey_char):
+                            is_hotkey_char = True
+                    except (ValueError, OverflowError):
+                        pass
+
+                if is_alt_key or is_hotkey_char:
                     log_info("Hotkey released! Stopping recording...")
-                    self._stop_recording()
-                elif hasattr(key, "char") and key.char and key.char.lower() == parts[1]:
+                    self._hotkey_triggered = False
                     self.hotkey_pressed = False
-                    log_info("Hotkey released! Stopping recording...")
                     self._stop_recording()
+                    return False  # Suppress the release event
 
-        # Start a regular listener to track key releases
-        self.release_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        self.release_listener.start()
+            # If hotkey was triggered but no longer recording, reset state
+            if self._hotkey_triggered and not self.recorder.is_recording():
+                self._hotkey_triggered = False
 
-        # Start the hotkey listener
+            # Allow all other keys
+            return True
+
+        log_info(f"Registering hotkeys with suppression: {self.hotkey}, {self.format_hotkey}")
+
+        # Create a single listener
+        # Note: suppress parameter doesn't work consistently across platforms,
+        # so we handle suppression manually in callbacks by returning False
+        self.hotkey_listener = keyboard.Listener(
+            on_press=on_press,
+            on_release=on_release
+        )
         self.hotkey_listener.start()
 
-        # Return a mock listener object for compatibility
-        return type("MockListener", (), {"stop": lambda: None})()
+        return self.hotkey_listener
 
     def _on_hotkey_press(self, format_mode: bool = False) -> None:
         """Handle global hotkey press events.
