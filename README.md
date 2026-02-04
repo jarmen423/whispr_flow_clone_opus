@@ -157,6 +157,9 @@ MIT
 **"CEREBRAS_API_KEY not set"**
 → Get free key at https://cloud.cerebras.ai/
 
+**"GROQ_API_KEY not set"**
+→ Get free key at https://groq.com/
+
 **"Hotkey not working"**
 → Check `agent/README.md` troubleshooting section
 
