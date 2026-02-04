@@ -1,63 +1,175 @@
+/**
+ * @fileoverview LocalFlow Global Styles - Tailwind CSS Configuration
+ *
+ * This stylesheet provides the global CSS configuration for the LocalFlow
+ * application. It defines CSS custom properties (variables) for theming,
+ * Tailwind directives, and custom animations for the dictation interface.
+ *
+ * Purpose & Reasoning:
+ *   The global stylesheet was created to:
+ *   1. Define a consistent design system via CSS custom properties
+ *   2. Support both light and dark themes (default: dark)
+ *   3. Provide smooth animations for recording indicators and audio visualization
+ *   4. Customize scrollbar appearance for a polished UI
+ *
+ *   CSS variables enable runtime theme switching and consistent color
+ *   usage across components without hardcoding values.
+ *
+ * Dependencies:
+ *   Build Tools:
+ *     - Tailwind CSS: Utility-first CSS framework
+ *     - PostCSS: CSS processing (via Tailwind)
+ *
+ *   Tailwind Plugins:
+ *     - tailwindcss-animate: Animation utilities
+ *
+ * Role in Codebase:
+ *   Imported by src/app/layout.tsx as the first stylesheet. These styles
+ *   apply globally to all pages and provide the foundation for Tailwind
+ *   utility classes used throughout the component tree.
+ *
+ * Key Technologies/APIs:
+ *   - @tailwind directives: Include Tailwind base, components, utilities
+ *   - CSS Custom Properties (variables): Theming system with --* prefix
+ *   - HSL color format: Hue-Saturation-Lightness for easy theming
+ *   - @keyframes: Custom animation definitions
+ *   - ::-webkit-scrollbar: WebKit scrollbar customization
+ *   - font-feature-settings: Advanced OpenType font features
+ *
+ * Theme Architecture:
+ *   The theme uses CSS custom properties in HSL format:
+ *   --background: 222.2 84% 4.9%  (HSL values)
+ *
+ *   This format allows easy opacity modification via hsl() function:
+ *   background: hsl(var(--background) / 0.8);  /* 80% opacity */
+ *
+ * @module app/globals.css
+ */
+
+/* ============================================================================
+   Tailwind Directives
+   ============================================================================
+   These directives tell Tailwind CSS where to inject its styles:
+   - base: Reset styles and base HTML element styles
+   - components: Component classes from plugins
+   - utilities: Utility classes (flex, grid, text-center, etc.)
+   ============================================================================ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   CSS Custom Properties (Variables)
+   ============================================================================
+   Define the design tokens for the application. Values are in HSL format
+   for easy opacity manipulation. The :root selector defines light theme,
+   .dark class overrides for dark theme.
+   ============================================================================ */
+
+/**
+ * Light Theme (Default) Custom Properties
+ *
+ * A clean, light color scheme suitable for bright environments.
+ * Currently not actively used as the app defaults to dark mode.
+ */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
+  --background: 0 0% 100%;          /* White background */
+  --foreground: 222.2 84% 4.9%;     /* Near-black text */
+  --card: 0 0% 100%;                /* White card backgrounds */
   --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
+  --popover: 0 0% 100%;             /* Dropdown/popover backgrounds */
   --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
+  --primary: 221.2 83.2% 53.3%;     /* Blue primary color */
+  --primary-foreground: 210 40% 98%; /* White text on primary */
+  --secondary: 210 40% 96.1%;       /* Light gray secondary */
   --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
+  --muted: 210 40% 96.1%;           /* Muted/subtle backgrounds */
   --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
+  --accent: 210 40% 96.1%;          /* Accent color (hover states) */
   --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
+  --destructive: 0 84.2% 60.2%;     /* Red for errors/destructive actions */
   --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
-  --radius: 0.5rem;
+  --border: 214.3 31.8% 91.4%;      /* Border colors */
+  --input: 214.3 31.8% 91.4%;       /* Input field borders */
+  --ring: 221.2 83.2% 53.3%;        /* Focus ring color */
+  --radius: 0.5rem;                 /* Default border radius */
 }
 
+/**
+ * Dark Theme Custom Properties
+ *
+ * A dark, high-contrast color scheme optimized for low-light environments.
+ * This is the default theme for LocalFlow, applied via the "dark" class
+ * on the HTML element in layout.tsx.
+ *
+ * Key Technologies/APIs:
+ *   - CSS specificity: .dark overrides :root values
+ *   - HSL color space: Consistent format for manipulation
+ */
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
+  --background: 222.2 84% 4.9%;     /* Dark blue-gray background */
+  --foreground: 210 40% 98%;        /* Light gray text */
+  --card: 222.2 84% 4.9%;           /* Card backgrounds */
   --card-foreground: 210 40% 98%;
   --popover: 222.2 84% 4.9%;
   --popover-foreground: 210 40% 98%;
-  --primary: 217.2 91.2% 59.8%;
+  --primary: 217.2 91.2% 59.8%;     /* Bright blue primary */
   --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
+  --secondary: 217.2 32.6% 17.5%;   /* Darker secondary */
   --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
+  --muted: 217.2 32.6% 17.5%;       /* Subtle backgrounds */
   --muted-foreground: 215 20.2% 65.1%;
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 0 62.8% 30.6%;     /* Darker red for dark theme */
   --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
+  --border: 217.2 32.6% 17.5%;      /* Subtle borders */
   --input: 217.2 32.6% 17.5%;
-  --ring: 224.3 76.3% 48%;
+  --ring: 224.3 76.3% 48%;          /* Brighter focus ring for visibility */
 }
 
+/**
+ * Global Border Color Reset
+ *
+ * Applies border color to all elements using the theme variable.
+ * This ensures consistent borders without specifying color each time.
+ */
 * {
   border-color: hsl(var(--border));
 }
 
+/**
+ * Body Element Styles
+ *
+ * Applies theme colors and typographic features to the document body.
+ *
+ * Key Technologies/APIs:
+ *   - font-feature-settings: Enables OpenType ligatures and contextual alternates
+ *     "rlig" 1: Required ligatures
+ *     "calt" 1: Contextual alternates for better typography
+ */
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
-/* Recording pulse animation */
+/* ============================================================================
+   Custom Animations
+   ============================================================================
+   Keyframe animations for the dictation interface including recording
+   pulse effects and audio visualization bars.
+   ============================================================================ */
+
+/**
+ * Recording Pulse Animation
+ *
+ * Creates a pulsing effect for the recording button by animating
+ * opacity and scale. Gives visual feedback that recording is active.
+ *
+ * Animation cycle: Normal -> Faded+Scaled -> Normal (1.5s)
+ */
 @keyframes recording-pulse {
   0%, 100% {
     opacity: 1;
@@ -69,22 +181,65 @@ body {
   }
 }
 
+/**
+ * Utility class for recording pulse animation
+ *
+ * Usage: <div class="animate-recording-pulse">
+ */
 .animate-recording-pulse {
   animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
-/* Audio visualization bars */
+/**
+ * Audio Visualization Bar Animation
+ *
+ * Animates audio bar height to simulate audio level visualization.
+ * Creates a bouncing effect from 20% to 100% height.
+ *
+ * Animation cycle: Short -> Tall -> Short (0.5s)
+ */
+@keyframes audio-bar {
+  0%, 100% {
+    height: 20%;
+  }
+  50% {
+    height: 100%;
+  }
+}
+
+/**
+ * Base audio bar animation class
+ *
+ * Individual bars use :nth-child selectors below for staggered delays,
+ * creating a wave-like effect.
+ */
 .audio-bar {
   animation: audio-bar 0.5s ease-in-out infinite;
 }
 
+/**
+ * Staggered animation delays for audio bars
+ *
+ * Creates a wave effect where bars animate in sequence rather than
+ * simultaneously. Pattern: 0s, 0.1s, 0.2s, 0.1s, 0s for 5 bars.
+ */
 .audio-bar:nth-child(1) { animation-delay: 0s; }
 .audio-bar:nth-child(2) { animation-delay: 0.1s; }
 .audio-bar:nth-child(3) { animation-delay: 0.2s; }
 .audio-bar:nth-child(4) { animation-delay: 0.1s; }
 .audio-bar:nth-child(5) { animation-delay: 0s; }
 
-/* Gradient text for branding */
+/**
+ * Gradient Text Utility
+ *
+ * Creates a blue-to-purple gradient text effect for branding.
+ * Used for the LocalFlow logo/title.
+ *
+ * Key Technologies/APIs:
+ *   - linear-gradient: CSS gradient background
+ *   - background-clip: text: Clips gradient to text shape
+ *   - -webkit-text-fill-color: transparent: Shows gradient through text
+ */
 .gradient-text {
   background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   -webkit-background-clip: text;
@@ -92,7 +247,19 @@ body {
   background-clip: text;
 }
 
-/* Smooth scrollbar */
+/* ============================================================================
+   Scrollbar Styling
+   ============================================================================
+   Custom scrollbar appearance for WebKit browsers (Chrome, Safari, Edge).
+   Provides a consistent, subtle scrollbar that matches the dark theme.
+   ============================================================================ */
+
+/**
+ * Scrollbar Track
+ *
+ * The background track that the scrollbar thumb moves within.
+ * Styled to match the muted background color with rounded corners.
+ */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -103,6 +270,12 @@ body {
   border-radius: 4px;
 }
 
+/**
+ * Scrollbar Thumb
+ *
+ * The draggable part of the scrollbar. Semi-transparent muted foreground
+ * color that becomes more opaque on hover for better visibility.
+ */
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.3);
   border-radius: 4px;
@@ -112,7 +285,18 @@ body {
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Status indicator animations */
+/* ============================================================================
+   Status Indicator Animations
+   ============================================================================
+   Animations for connection status indicators showing agent and server state.
+   ============================================================================ */
+
+/**
+ * Online Status Indicator
+ *
+ * Green pulsing dot with expanding shadow animation to indicate
+ * active connection. Creates a "heartbeat" effect.
+ */
 .status-online {
   background-color: #22c55e;
   box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
@@ -131,10 +315,20 @@ body {
   }
 }
 
+/**
+ * Offline Status Indicator
+ *
+ * Solid red dot indicating disconnected state. No animation.
+ */
 .status-offline {
   background-color: #ef4444;
 }
 
+/**
+ * Connecting Status Indicator
+ *
+ * Amber dot with opacity pulse to indicate connection in progress.
+ */
 .status-connecting {
   background-color: #f59e0b;
   animation: pulse-connecting 1s infinite;

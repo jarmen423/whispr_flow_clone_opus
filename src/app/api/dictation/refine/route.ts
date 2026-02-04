@@ -1,46 +1,161 @@
+/**
+ * @fileoverview LocalFlow Refinement API Route - LLM Text Processing
+ *
+ * This module provides the API endpoint for text refinement using LLMs,
+ * supporting multiple processing modes (cloud, networked-local, local) and
+ * refinement styles (developer, concise, professional, raw, outline).
+ *
+ * Purpose & Reasoning:
+ *   This API route serves as the abstraction layer between the frontend and
+ *   various LLM backends for text refinement. It implements different
+ *   "personalities" or refinement modes:
+ *   - developer: Corrects technical terms, grammar, removes filler words
+ *   - concise: Shortens text while preserving meaning
+ *   - professional: Formal business language with profanity filtering
+ *   - raw: Pass-through mode with no changes
+ *   - outline: Structured markdown formatting (uses Cerebras API)
+ *
+ *   The route handles prompt construction, mode selection, error handling,
+ *   and unified response formatting across all LLM backends.
+ *
+ * Dependencies:
+ *   External Services:
+ *     - Groq API: Cloud-based LLM (llama-3.3-70b-versatile)
+ *     - Cerebras API: GPT-OSS-120B for outline formatting mode
+ *     - Ollama: Local/remote LLM server (llama3.2:1b default)
+ *
+ *   Next.js APIs:
+ *     - next/server.NextRequest/NextResponse: Request/response handling
+ *
+ * Role in Codebase:
+ *   Called by the main page (src/app/page.tsx) after receiving transcription
+ *   to improve text quality. Also called by the WebSocket service
+ *   (mini-services/websocket-service/index.ts) when processing agent audio.
+ *
+ *   POST /api/dictation/refine - Process text and return refined version
+ *
+ * Key Technologies/APIs:
+ *   - fetch: HTTP requests to LLM APIs
+ *   - JSON.stringify: Request body construction
+ *   - AbortSignal.timeout: Request timeout handling
+ *   - System prompts: Role-based prompt engineering
+ *
+ * @module app/api/dictation/refine/route
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 
 // ============================================
 // Environment Configuration
 // ============================================
 
-// Processing mode: 'cloud' | 'networked-local' | 'local'
+/**
+ * Processing mode from environment or default.
+ * Controls which LLM backend is used.
+ */
 const PROCESSING_MODE = process.env.PROCESSING_MODE || "networked-local";
 
-// Groq Cloud API Configuration (for LLM text refinement)
+/**
+ * Groq API key for cloud refinement.
+ * Used with Groq's fast LLM inference API.
+ */
 const ZAI_API_KEY = process.env.GROQ_API_KEY || process.env.ZAI_API_KEY || "";
-const GROQ_LLM_API_BASE_URL = process.env.GROQ_LLM_API_BASE_URL || "https://api.groq.com/openai/v1/chat/completions";
+
+/**
+ * Groq LLM API endpoint URL.
+ * OpenAI-compatible chat completions endpoint.
+ */
+const GROQ_LLM_API_BASE_URL =
+  process.env.GROQ_LLM_API_BASE_URL || "https://api.groq.com/openai/v1/chat/completions";
+
+/**
+ * LLM model identifier for Groq API.
+ * Default: llama-3.3-70b-versatile (balanced quality/speed).
+ */
 const ZAI_LLM_MODEL = process.env.GROQ_LLM_MODEL || process.env.ZAI_LLM_MODEL || "llama-3.3-70b-versatile";
 
-// Cerebras API Configuration (for outline formatting mode)
+/**
+ * Cerebras API key for outline formatting mode.
+ * Provides access to GPT-OSS-120B model.
+ */
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || "";
+
+/**
+ * Cerebras API endpoint URL.
+ */
 const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
+
+/**
+ * Cerebras model for outline mode.
+ * Default: gpt-oss-120b (powerful open-source model).
+ */
 const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || "gpt-oss-120b";
 
-// Ollama Configuration (for networked-local and local modes)
+/**
+ * Ollama server URL for local/networked-local modes.
+ * Default: http://localhost:11434
+ */
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+
+/**
+ * Ollama model for local refinement.
+ * Default: llama3.2:1b (lightweight, fast).
+ */
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:1b";
+
+/**
+ * Temperature setting for Ollama generation.
+ * Lower = more deterministic, higher = more creative.
+ */
 const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
 
 // ============================================
 // Types
 // ============================================
 
+/**
+ * Available refinement modes.
+ * - developer: Technical term correction, grammar fix
+ * - concise: Shortened, simplified text
+ * - professional: Formal business language
+ * - raw: No processing (pass-through)
+ * - outline: Markdown structure formatting
+ */
 type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline";
 
+/**
+ * Request body for refinement endpoint.
+ *
+ * @interface RefineRequest
+ */
 interface RefineRequest {
+  /** Text to refine */
   text: string;
+  /** Refinement mode to use */
   mode?: RefinementMode;
+  /** Processing mode override */
   processingMode?: "cloud" | "networked-local" | "local";
 }
 
+/**
+ * Response body for refinement endpoint.
+ *
+ * @interface RefineResponse
+ */
 interface RefineResponse {
+  /** Whether refinement succeeded */
   success: boolean;
+  /** Refined text (on success) */
   refinedText?: string;
+  /** Word count of original text */
   originalWordCount?: number;
+  /** Word count of refined text */
   refinedWordCount?: number;
+  /** Mode actually used for processing */
   processingMode?: "cloud" | "networked-local" | "local";
+  /** Error message (on failure) */
   error?: string;
+  /** Detailed error information (on failure) */
   details?: string;
 }
 
@@ -48,7 +163,13 @@ interface RefineResponse {
 // System Prompts
 // ============================================
 
-// Outline mode prompt for Cerebras formatting
+/**
+ * System prompt for outline mode (Cerebras).
+ *
+ * Converts spoken text into properly formatted markdown with support
+ * for explicit formatting commands ("new line", "bullet", etc.) and
+ * implicit pattern detection.
+ */
 const OUTLINE_PROMPT = `You are a text formatting assistant for voice dictation. Convert spoken text into properly formatted markdown.
 
 EXPLICIT COMMANDS - Convert these spoken words to formatting:
@@ -72,6 +193,12 @@ RULES:
 5. Maintain the exact meaning, only add structure
 6. Use proper markdown syntax (- for bullets, 1. 2. 3. for numbers)`;
 
+/**
+ * System prompts for standard refinement modes.
+ *
+ * Each mode has specific instructions for how to transform
+ * the raw transcript into polished text.
+ */
 const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string> = {
   developer: `You are a dictation correction tool for developers. Your ONLY job is to clean up transcribed speech. You must:
 1. Correct grammar and punctuation
@@ -108,14 +235,23 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 // ============================================
 
 /**
- * Count words in text
+ * Counts words in text.
+ *
+ * @param text - Text to count words in
+ * @returns number - Word count
  */
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 /**
- * Validate incoming refine request
+ * Validates incoming refinement request data.
+ *
+ * Checks that the request contains valid text and mode.
+ *
+ * @param data - Unknown data to validate
+ * @returns boolean - True if data is valid RefineRequest
+ * @throws Error - If text too long or mode invalid
  */
 function validateRequest(data: unknown): data is RefineRequest {
   if (!data || typeof data !== "object") return false;
@@ -141,7 +277,13 @@ function validateRequest(data: unknown): data is RefineRequest {
 }
 
 /**
- * Determine effective processing mode based on configuration
+ * Determines the effective processing mode based on configuration.
+ *
+ * Validates that required credentials are available for the
+ * requested mode, falling back to alternatives if necessary.
+ *
+ * @param requestedMode - Mode requested by client (optional)
+ * @returns "cloud" | "networked-local" | "local" - Effective mode
  */
 function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" | "local" {
   const mode = requestedMode || PROCESSING_MODE;
@@ -164,15 +306,28 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
 // ============================================
 
 /**
- * Refine text using Groq LLM API
- * API Docs: https://console.groq.com/docs/quickstart
+ * Refines text using Groq LLM API.
+ *
+ * Sends text to Groq's cloud-based Llama model for refinement
+ * according to the specified mode (developer, concise, professional).
+ *
+ * Purpose & Reasoning:
+ *   Groq provides the fastest LLM inference with excellent quality.
+ *   This is the recommended mode for users prioritizing speed.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: POST to Groq chat completions endpoint
+ *   - OpenAI-compatible API: Standard messages format
+ *   - AbortSignal.timeout: 30-second timeout
+ *
+ * @param text - Text to refine
+ * @param mode - Refinement mode (developer, concise, professional)
+ * @returns string - Refined text
+ * @throws Error - On API errors or timeouts
  */
-async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
+async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw" | "outline">): Promise<string> {
   if (!ZAI_API_KEY) {
-    throw new Error(
-      "GROQ_API_KEY is required for cloud mode. " +
-      "Get your API key from: https://console.groq.com/keys"
-    );
+    throw new Error("GROQ_API_KEY is required for cloud mode. " + "Get your API key from: https://console.groq.com/keys");
   }
 
   const systemPrompt = SYSTEM_PROMPTS[mode];
@@ -181,7 +336,7 @@ async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): 
     const response = await fetch(GROQ_LLM_API_BASE_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${ZAI_API_KEY}`,
+        Authorization: `Bearer ${ZAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -241,10 +396,26 @@ async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw">): 
 // ============================================
 
 /**
- * Refine text using Ollama API
- * Works for both networked-local and local modes (just different OLLAMA_URL)
+ * Refines text using Ollama API.
+ *
+ * Sends text to a local or remote Ollama server for refinement.
+ * Works for both networked-local and local modes (different URLs).
+ *
+ * Purpose & Reasoning:
+ *   Ollama provides self-hosted LLM inference for privacy.
+ *   Can run on the same machine (local) or another on the network.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: GET to /api/tags for health check
+ *   - fetch: POST to /api/chat for generation
+ *   - AbortSignal.timeout: Connection and generation timeouts
+ *
+ * @param text - Text to refine
+ * @param mode - Refinement mode (developer, concise, professional)
+ * @returns string - Refined text
+ * @throws Error - On connection failures or processing errors
  */
-async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">): Promise<string> {
+async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw" | "outline">): Promise<string> {
   const systemPrompt = SYSTEM_PROMPTS[mode];
 
   console.log(`[Refine] Calling Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
@@ -266,7 +437,7 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
       model: OLLAMA_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: text }
+        { role: "user", content: text },
       ],
       stream: false,
       options: {
@@ -276,7 +447,13 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
       },
     };
 
-    console.log(`[Refine] Request body:`, JSON.stringify({ ...requestBody, messages: requestBody.messages.map(m => ({ role: m.role, content: m.content.substring(0, 50) + "..." })) }));
+    console.log(
+      `[Refine] Request body:`,
+      JSON.stringify({
+        ...requestBody,
+        messages: requestBody.messages.map((m) => ({ role: m.role, content: m.content.substring(0, 50) + "..." })),
+      })
+    );
 
     const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
@@ -290,9 +467,7 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
     if (!response.ok) {
       const errorText = await response.text();
       if (errorText.includes("model") && errorText.includes("not found")) {
-        throw new Error(
-          `Model ${OLLAMA_MODEL} not found. Install with: ollama pull ${OLLAMA_MODEL}`
-        );
+        throw new Error(`Model ${OLLAMA_MODEL} not found. Install with: ollama pull ${OLLAMA_MODEL}`);
       }
       throw new Error(`Ollama API error: ${response.status}`);
     }
@@ -316,9 +491,7 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
         throw new Error("Ollama request timed out (30s limit)");
       }
       if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed")) {
-        throw new Error(
-          `Ollama not running at ${OLLAMA_URL}. Start with: ollama serve`
-        );
+        throw new Error(`Ollama not running at ${OLLAMA_URL}. Start with: ollama serve`);
       }
       throw error;
     }
@@ -331,14 +504,30 @@ async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw">):
 // ============================================
 
 /**
- * Refine text using Cerebras API for outline/formatting mode
- * Uses GPT-OSS-120B with specific formatting instructions
+ * Refines text using Cerebras API for outline/formatting mode.
+ *
+ * Uses Cerebras' GPT-OSS-120B model with specific formatting
+ * instructions to convert spoken text to structured markdown.
+ *
+ * Purpose & Reasoning:
+ *   Cerebras' GPT-OSS model excels at following structured formatting
+ *   instructions, making it ideal for the outline mode where spoken
+ *   text needs to be converted to proper markdown with lists,
+ *   indentation, and paragraph breaks.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: POST to Cerebras chat completions endpoint
+ *   - reasoning_effort: Cerebras-specific parameter for speed/quality tradeoff
+ *   - AbortSignal.timeout: 30-second timeout
+ *
+ * @param text - Text to format
+ * @returns string - Formatted markdown text
+ * @throws Error - On API errors or connection failures
  */
 async function refineCerebras(text: string): Promise<string> {
   if (!CEREBRAS_API_KEY) {
     throw new Error(
-      "CEREBRAS_API_KEY is required for outline mode. " +
-      "Get your API key from: https://cloud.cerebras.ai/"
+      "CEREBRAS_API_KEY is required for outline mode. " + "Get your API key from: https://cloud.cerebras.ai/"
     );
   }
 
@@ -348,7 +537,7 @@ async function refineCerebras(text: string): Promise<string> {
     const response = await fetch(CEREBRAS_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${CEREBRAS_API_KEY}`,
+        Authorization: `Bearer ${CEREBRAS_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -406,6 +595,38 @@ async function refineCerebras(text: string): Promise<string> {
 // Main Route Handler
 // ============================================
 
+/**
+ * POST handler for text refinement.
+ *
+ * Main API endpoint that receives text, validates it, selects the
+ * appropriate processing mode and refinement style, executes the
+ * LLM processing, and returns the refined results.
+ *
+ * Key Technologies/APIs:
+ *   - NextRequest/NextResponse: Next.js App Router API types
+ *   - Request.json(): Parse JSON request body
+ *   - Response.json(): Return JSON response
+ *
+ * @param request - Next.js request object
+ * @returns NextResponse with RefineResponse body
+ *
+ * @example
+ * POST /api/dictation/refine
+ * {
+ *   "text": "um like hello world you know",
+ *   "mode": "developer",
+ *   "processingMode": "cloud"
+ * }
+ *
+ * Response:
+ * {
+ *   "success": true,
+ *   "refinedText": "Hello world",
+ *   "originalWordCount": 6,
+ *   "refinedWordCount": 2,
+ *   "processingMode": "cloud"
+ * }
+ */
 export async function POST(request: NextRequest): Promise<NextResponse<RefineResponse>> {
   try {
     const body = await request.json();
@@ -481,7 +702,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
   }
 }
 
-// Handle OPTIONS for CORS
+/**
+ * OPTIONS handler for CORS preflight requests.
+ *
+ * Responds to CORS preflight requests with appropriate headers
+ * to allow cross-origin requests from the desktop agent.
+ *
+ * @returns NextResponse with CORS headers
+ */
 export async function OPTIONS(): Promise<NextResponse> {
   return new NextResponse(null, {
     status: 204,

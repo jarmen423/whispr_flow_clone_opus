@@ -1,3 +1,53 @@
+/**
+ * @fileoverview LocalFlow Transcription API Route - Speech-to-Text Processing
+ *
+ * This module provides the API endpoint for audio transcription, supporting
+ * multiple processing modes: cloud (Groq API), networked-local (remote Whisper/LFM
+ * servers), and local (Whisper.cpp binary execution).
+ *
+ * Purpose & Reasoning:
+ *   This API route serves as the abstraction layer between the frontend and
+ *   various speech-to-text backends. It was designed to support flexibility
+ *   in deployment scenarios:
+ *   - Cloud mode: Fastest processing via Groq's Whisper API
+ *   - Networked-local: Self-hosted processing on another machine
+ *   - Local: Complete privacy with on-device processing
+ *
+ *   The route handles audio decoding, mode selection, error handling, and
+ *   unified response formatting across all backends.
+ *
+ * Dependencies:
+ *   External Services:
+ *     - Groq API: Cloud-based Whisper transcription (console.groq.com)
+ *     - Whisper API: Remote whisper.cpp server (WHISPER_API_URL)
+ *     - LFM Server: LFM 2.5 Audio server for multimodal processing
+ *
+ *   Node.js APIs:
+ *     - fs: File system operations for local mode temp files
+ *     - child_process.execSync: Local Whisper.cpp execution
+ *     - os.tmpdir: Temporary directory for audio processing
+ *
+ *   Next.js APIs:
+ *     - next/server.NextRequest/NextResponse: Request/response handling
+ *
+ * Role in Codebase:
+ *   Called by the main page (src/app/page.tsx) when the user finishes
+ *   recording audio. Also called by the WebSocket service
+ *   (mini-services/websocket-service/index.ts) when processing audio
+ *   from desktop agents.
+ *
+ *   POST /api/dictation/transcribe - Process audio and return transcription
+ *
+ * Key Technologies/APIs:
+ *   - fetch: HTTP requests to external APIs
+ *   - FormData: Multipart form construction for audio upload
+ *   - Buffer.from: Base64 audio decoding
+ *   - AbortSignal.timeout: Request timeout handling
+ *   - execSync: Synchronous process execution for local Whisper
+ *
+ * @module app/api/dictation/transcribe/route
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
@@ -8,44 +58,95 @@ import { tmpdir } from "os";
 // Environment Configuration
 // ============================================
 
-// Processing mode: 'cloud' | 'networked-local' | 'local'
+/**
+ * Processing mode from environment or default.
+ * Controls which transcription backend is used.
+ */
 const PROCESSING_MODE = process.env.PROCESSING_MODE || "networked-local";
 
-// Groq Cloud API Configuration (for audio transcription)
+/**
+ * Groq API key for cloud transcription.
+ * Falls back from GROQ_API_KEY to ZAI_API_KEY for compatibility.
+ */
 const ZAI_API_KEY = process.env.GROQ_API_KEY || process.env.ZAI_API_KEY || "";
-const GROQ_ASR_API_BASE_URL = process.env.GROQ_ASR_API_BASE_URL || "https://api.groq.com/openai/v1/audio/transcriptions";
+
+/**
+ * Groq ASR API endpoint URL.
+ * Uses Groq's OpenAI-compatible audio transcriptions endpoint.
+ */
+const GROQ_ASR_API_BASE_URL =
+  process.env.GROQ_ASR_API_BASE_URL || "https://api.groq.com/openai/v1/audio/transcriptions";
+
+/**
+ * ASR model identifier for Groq API.
+ * Default: whisper-large-v3 (high quality, multilingual).
+ */
 const ZAI_ASR_MODEL = process.env.GROQ_ASR_MODEL || process.env.ZAI_ASR_MODEL || "whisper-large-v3";
 
-// Remote Whisper API Configuration (for networked-local mode)
+/**
+ * URL for remote Whisper/LFM server in networked-local mode.
+ * Example: http://192.168.1.100:8080 or http://192.168.1.100:8888
+ */
 const WHISPER_API_URL = process.env.WHISPER_API_URL || "";
 
-// Audio API Type: 'whisper' | 'lfm' | 'auto' (auto-detect)
-// - 'whisper': Use Whisper.cpp server /inference endpoint
-// - 'lfm': Use LFM 2.5 Audio /v1/chat/completions endpoint (multimodal)
-// - 'auto': Try LFM first, fall back to Whisper
+/**
+ * Audio API type for networked-local mode.
+ * - 'whisper': Use Whisper.cpp /inference endpoint
+ * - 'lfm': Use LFM 2.5 Audio /v1/chat/completions endpoint
+ * - 'auto': Auto-detect based on server capabilities
+ */
 const AUDIO_API_TYPE = process.env.AUDIO_API_TYPE || "auto";
 
-// Local Whisper Binary Configuration (for local mode)
+/**
+ * Path to local Whisper.cpp binary for local mode.
+ */
 const WHISPER_PATH = process.env.WHISPER_PATH || "/usr/local/bin/whisper";
+
+/**
+ * Path to Whisper model file for local mode.
+ */
 const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH || "./models/ggml-small-q5_1.bin";
+
+/**
+ * Number of threads for Whisper.cpp processing.
+ */
 const WHISPER_THREADS = process.env.WHISPER_THREADS || "4";
 
 // ============================================
 // Types
 // ============================================
 
+/**
+ * Request body for transcription endpoint.
+ *
+ * @interface TranscribeRequest
+ */
 interface TranscribeRequest {
-  audio: string; // base64-encoded audio
+  /** Base64-encoded audio data */
+  audio: string;
+  /** Processing mode override */
   mode?: "cloud" | "networked-local" | "local";
 }
 
+/**
+ * Response body for transcription endpoint.
+ *
+ * @interface TranscribeResponse
+ */
 interface TranscribeResponse {
+  /** Whether transcription succeeded */
   success: boolean;
+  /** Transcribed text (on success) */
   text?: string;
+  /** Word count of transcription (on success) */
   wordCount?: number;
+  /** Mode actually used for processing */
   mode?: "cloud" | "networked-local" | "local";
+  /** Processing time in milliseconds (on success) */
   processingTime?: number;
+  /** Error message (on failure) */
   error?: string;
+  /** Detailed error information (on failure) */
   details?: string;
 }
 
@@ -54,7 +155,19 @@ interface TranscribeResponse {
 // ============================================
 
 /**
- * Validate incoming transcription request
+ * Validates incoming transcription request data.
+ *
+ * Checks that the request contains valid audio data (base64 string)
+ * and optionally validates the processing mode. Throws errors for
+ * invalid data with descriptive messages.
+ *
+ * Key Technologies/APIs:
+ *   - TypeScript type guards: data is TranscribeRequest
+ *   - String length check: 5MB base64 limit (~3.75MB raw)
+ *
+ * @param data - Unknown data to validate
+ * @returns boolean - True if data is valid TranscribeRequest
+ * @throws Error - If audio too large or mode invalid
  */
 function validateRequest(data: unknown): data is TranscribeRequest {
   if (!data || typeof data !== "object") return false;
@@ -77,14 +190,27 @@ function validateRequest(data: unknown): data is TranscribeRequest {
 }
 
 /**
- * Count words in text
+ * Counts words in text for statistics.
+ *
+ * @param text - Text to count words in
+ * @returns number - Word count
  */
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 /**
- * Determine effective processing mode based on configuration
+ * Determines the effective processing mode based on configuration.
+ *
+ * Validates that required credentials/URLs are available for the
+ * requested mode, falling back to alternative modes if necessary.
+ *
+ * Key Technologies/APIs:
+ *   - Environment variable access
+ *   - Console.warn: Fallback notifications
+ *
+ * @param requestedMode - Mode requested by client (optional)
+ * @returns "cloud" | "networked-local" | "local" - Effective mode
  */
 function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" | "local" {
   const mode = requestedMode || PROCESSING_MODE;
@@ -92,7 +218,9 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
   // Cloud mode requires API key
   if (mode === "cloud") {
     if (!ZAI_API_KEY) {
-      console.warn("[Transcribe] Cloud mode requested but GROQ_API_KEY not set, falling back to networked-local");
+      console.warn(
+        "[Transcribe] Cloud mode requested but GROQ_API_KEY not set, falling back to networked-local"
+      );
       return WHISPER_API_URL ? "networked-local" : "local";
     }
     return "cloud";
@@ -101,7 +229,9 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
   // Networked-local mode requires WHISPER_API_URL
   if (mode === "networked-local") {
     if (!WHISPER_API_URL) {
-      console.warn("[Transcribe] Networked-local mode requested but WHISPER_API_URL not set, falling back to local");
+      console.warn(
+        "[Transcribe] Networked-local mode requested but WHISPER_API_URL not set, falling back to local"
+      );
       return "local";
     }
     return "networked-local";
@@ -115,16 +245,37 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
 // ============================================
 
 /**
- * Transcribe audio using Groq Whisper API
- * API Docs: https://console.groq.com/docs/speech-text
+ * Transcribes audio using Groq's Whisper API.
+ *
+ * Sends audio to Groq's cloud-based Whisper service for fast,
+ * high-quality transcription. Supports the whisper-large-v3 model
+ * with automatic language detection.
+ *
+ * Purpose & Reasoning:
+ *   Groq provides the fastest transcription with excellent accuracy.
+ *   This is the recommended mode for users who prioritize speed
+ *   and don't mind sending audio to a third-party service.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: POST to Groq ASR endpoint
+ *   - FormData: Multipart form with audio file
+ *   - AbortSignal.timeout: 60-second request timeout
+ *   - Buffer.from: Base64 to binary conversion
+ *
+ * @param audioBase64 - Base64-encoded audio data
+ * @returns Object with transcribed text and processing time
+ * @throws Error - On API errors, timeouts, or no speech detected
+ *
+ * @example
+ * const result = await transcribeCloud(base64Audio);
+ * console.log(result.text); // "Hello world"
  */
 async function transcribeCloud(audioBase64: string): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
 
   if (!ZAI_API_KEY) {
     throw new Error(
-      "GROQ_API_KEY is required for cloud mode. " +
-      "Get your API key from: https://console.groq.com/keys"
+      "GROQ_API_KEY is required for cloud mode. " + "Get your API key from: https://console.groq.com/keys"
     );
   }
 
@@ -143,7 +294,7 @@ async function transcribeCloud(audioBase64: string): Promise<{ text: string; pro
     const response = await fetch(GROQ_ASR_API_BASE_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${ZAI_API_KEY}`,
+        Authorization: `Bearer ${ZAI_API_KEY}`,
       },
       body: formData,
       signal: AbortSignal.timeout(60000), // 60 second timeout
@@ -198,9 +349,25 @@ async function transcribeCloud(audioBase64: string): Promise<{ text: string; pro
 // ============================================
 
 /**
- * Transcribe using LFM 2.5 Audio via OpenAI-compatible chat completions API
- * The audio is sent as multimodal content with a system prompt for ASR
- * NOTE: LFM 2.5 server requires streaming mode
+ * Transcribes audio using LFM 2.5 Audio multimodal API.
+ *
+ * Sends audio to an LFM (Liquid Foundation Model) server using the
+ * OpenAI-compatible chat completions API with streaming support.
+ *
+ * Purpose & Reasoning:
+ *   LFM 2.5 Audio is a multimodal model that can process audio
+ *   directly, potentially offering better quality than Whisper
+ *   on certain types of content.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: POST to /v1/chat/completions
+ *   - SSE streaming: Server-sent events for progressive responses
+ *   - ReadableStream.getReader: Stream reading
+ *   - TextDecoder: Binary to string conversion
+ *
+ * @param audioBase64 - Base64-encoded audio data
+ * @returns Object with transcribed text and processing time
+ * @throws Error - On API errors or connection failures
  */
 async function transcribeLFM(audioBase64: string): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
@@ -208,7 +375,7 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
   if (!WHISPER_API_URL) {
     throw new Error(
       "WHISPER_API_URL is required for LFM mode. " +
-      "Set it to your LFM 2.5 Audio server URL (e.g., http://192.168.1.100:8888)"
+        "Set it to your LFM 2.5 Audio server URL (e.g., http://192.168.1.100:8888)"
     );
   }
 
@@ -224,7 +391,7 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
         messages: [
           {
             role: "system",
-            content: "Perform ASR."
+            content: "Perform ASR.",
           },
           {
             role: "user",
@@ -233,11 +400,11 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
                 type: "input_audio",
                 input_audio: {
                   data: audioBase64,
-                  format: "wav"
-                }
-              }
-            ]
-          }
+                  format: "wav",
+                },
+              },
+            ],
+          },
         ],
         max_tokens: 500,
         temperature: 0.0,
@@ -302,8 +469,7 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
       }
       if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed")) {
         throw new Error(
-          `Cannot connect to LFM API at ${WHISPER_API_URL}. ` +
-          `Make sure the llama-liquid-audio-server is running.`
+          `Cannot connect to LFM API at ${WHISPER_API_URL}. ` + `Make sure the llama-liquid-audio-server is running.`
         );
       }
       throw error;
@@ -313,7 +479,24 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
 }
 
 /**
- * Transcribe using remote Whisper.cpp HTTP API server
+ * Transcribes audio using remote Whisper.cpp HTTP server.
+ *
+ * Sends audio to a whisper.cpp server instance via its /inference
+ * endpoint. Compatible with the standard whisper.cpp HTTP server.
+ *
+ * Purpose & Reasoning:
+ *   Whisper.cpp servers provide a lightweight, efficient option
+ *   for self-hosted transcription without the complexity of
+ *   multimodal models.
+ *
+ * Key Technologies/APIs:
+ *   - fetch: POST to /inference endpoint
+ *   - FormData: Multipart form with audio file
+ *   - AbortSignal.timeout: 60-second timeout
+ *
+ * @param audioBase64 - Base64-encoded audio data
+ * @returns Object with transcribed text and processing time
+ * @throws Error - On API errors or connection failures
  */
 async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
@@ -321,7 +504,7 @@ async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string
   if (!WHISPER_API_URL) {
     throw new Error(
       "WHISPER_API_URL is required for Whisper.cpp mode. " +
-      "Set it to your whisper.cpp server URL (e.g., http://192.168.1.100:8080)"
+        "Set it to your whisper.cpp server URL (e.g., http://192.168.1.100:8080)"
     );
   }
 
@@ -368,7 +551,7 @@ async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string
       if (error.message.includes("ECONNREFUSED") || error.message.includes("fetch failed")) {
         throw new Error(
           `Cannot connect to Whisper API at ${WHISPER_API_URL}. ` +
-          `Make sure the whisper.cpp server is running: ./server -m model.bin --host 0.0.0.0 --port 8080`
+            `Make sure the whisper.cpp server is running: ./server -m model.bin --host 0.0.0.0 --port 8080`
         );
       }
       throw error;
@@ -378,14 +561,24 @@ async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string
 }
 
 /**
- * Transcribe audio using networked local server
- * Supports both Whisper.cpp and LFM 2.5 Audio servers
+ * Transcribes audio using networked local server with auto-detection.
+ *
+ * Determines whether to use LFM or Whisper.cpp based on configuration
+ * or auto-detection via endpoint probing.
+ *
+ * Key Technologies/APIs:
+ *   - Endpoint probing: /v1/models for LFM, /health for Whisper
+ *   - AbortSignal.timeout: Quick detection timeouts
+ *
+ * @param audioBase64 - Base64-encoded audio data
+ * @returns Object with transcribed text and processing time
+ * @throws Error - If server unavailable or neither API detected
  */
 async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: string; processingTime: number }> {
   if (!WHISPER_API_URL) {
     throw new Error(
       "WHISPER_API_URL is required for networked-local mode. " +
-      "Set it to your audio server URL (e.g., http://192.168.1.100:8888)"
+        "Set it to your audio server URL (e.g., http://192.168.1.100:8888)"
     );
   }
 
@@ -441,7 +634,26 @@ async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: st
 // ============================================
 
 /**
- * Transcribe using local Whisper.cpp binary
+ * Transcribes audio using local Whisper.cpp binary.
+ *
+ * Writes audio to a temp file, executes the Whisper.cpp binary,
+ * reads the output, and cleans up. Provides complete privacy
+ * as no data leaves the local machine.
+ *
+ * Purpose & Reasoning:
+ *   Local mode provides maximum privacy and zero external
+ *   dependencies once set up. Suitable for air-gapped environments
+ *   or users with strict data privacy requirements.
+ *
+ * Key Technologies/APIs:
+ *   - fs: File write/read/unlink for temp files
+ *   - child_process.execSync: Execute Whisper binary
+ *   - os.tmpdir: System temp directory
+ *   - path.join: Cross-platform path construction
+ *
+ * @param audioBase64 - Base64-encoded audio data
+ * @returns Object with transcribed text and processing time
+ * @throws Error - If binary missing, model missing, or processing fails
  */
 async function transcribeLocalBinary(audioBase64: string): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
@@ -449,8 +661,7 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
   // Verify Whisper binary exists
   if (!existsSync(WHISPER_PATH)) {
     throw new Error(
-      `Whisper binary not found at ${WHISPER_PATH}. ` +
-      `Install from: https://github.com/ggerganov/whisper.cpp/releases`
+      `Whisper binary not found at ${WHISPER_PATH}. ` + `Install from: https://github.com/ggerganov/whisper.cpp/releases`
     );
   }
 
@@ -458,7 +669,7 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
   if (!existsSync(WHISPER_MODEL_PATH)) {
     throw new Error(
       `Whisper model not found at ${WHISPER_MODEL_PATH}. ` +
-      `Download from: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin`
+        `Download from: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin`
     );
   }
 
@@ -509,7 +720,9 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
     // Cleanup on error
     try {
       if (existsSync(inputPath)) unlinkSync(inputPath);
-    } catch { /* ignore cleanup errors */ }
+    } catch {
+      /* ignore cleanup errors */
+    }
 
     if (error instanceof Error) {
       if (error.message.includes("ETIMEDOUT") || error.message.includes("timeout")) {
@@ -525,6 +738,37 @@ async function transcribeLocalBinary(audioBase64: string): Promise<{ text: strin
 // Main Route Handler
 // ============================================
 
+/**
+ * POST handler for audio transcription.
+ *
+ * Main API endpoint that receives audio data, validates it, selects
+ * the appropriate processing mode, executes transcription, and
+ * returns the results.
+ *
+ * Key Technologies/APIs:
+ *   - NextRequest/NextResponse: Next.js App Router API types
+ *   - Request.json(): Parse JSON request body
+ *   - Response.json(): Return JSON response
+ *
+ * @param request - Next.js request object
+ * @returns NextResponse with TranscribeResponse body
+ *
+ * @example
+ * POST /api/dictation/transcribe
+ * {
+ *   "audio": "base64EncodedAudioString...",
+ *   "mode": "cloud"
+ * }
+ *
+ * Response:
+ * {
+ *   "success": true,
+ *   "text": "Hello world",
+ *   "wordCount": 2,
+ *   "mode": "cloud",
+ *   "processingTime": 500
+ * }
+ */
 export async function POST(request: NextRequest): Promise<NextResponse<TranscribeResponse>> {
   try {
     const body = await request.json();
@@ -584,7 +828,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transcrib
   }
 }
 
-// Handle OPTIONS for CORS
+/**
+ * OPTIONS handler for CORS preflight requests.
+ *
+ * Responds to CORS preflight requests with appropriate headers
+ * to allow cross-origin requests from the desktop agent.
+ *
+ * @returns NextResponse with CORS headers
+ */
 export async function OPTIONS(): Promise<NextResponse> {
   return new NextResponse(null, {
     status: 204,
