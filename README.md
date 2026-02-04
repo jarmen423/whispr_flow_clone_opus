@@ -96,7 +96,8 @@ LOCALFLOW_FORMAT_HOTKEY=alt+m   # Format mode
 
 # Processing
 PROCESSING_MODE=cloud           # cloud | networked-local | local
-GROQ_API_KEY=your_key_here      # For cloud transcription
+GROQ_API_KEY=your_key_here      # Get from https://groq.com/
+# free teir more than enough for most daily dictation use
 ```
 
 See `.env.example` for all options.
