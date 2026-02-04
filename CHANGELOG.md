@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Translation Mode (🌐 Speak Any Language → English)
+
+**New Feature:** Real-time translation of non-English speech to English with translation-ese correction.
+
+**How It Works**
+- Press `Alt+T` to toggle translation mode (or use UI toggle)
+- Speak in any language (Spanish, French, German, etc.)
+- Whisper translates to English
+- Refinement LLM fixes "translation-ese" (awkward grammar from raw translation)
+
+**Translation Pipeline**
+```
+Spanish Speech → Whisper Translation → Raw English → LLM Refinement → Natural English
+```
+
+**Key Features**
+- **Alt+T Hotkey**: Toggle translation mode on both web UI and desktop agent
+- **Visual Indicator**: Blue "🌐 Translate" badge in web UI header when active
+- **Translation-Aware Prompts**: LLM receives special instructions to fix common translation issues:
+  - "The car red" → "The red car"
+  - "I have hunger" → "I'm hungry"
+- **Groq API Integration**: Uses dedicated `/v1/audio/translations` endpoint (requires whisper-large-v3)
+- **Full Stack Support**: Works in Cloud, Networked-Local, and Local modes
+
+**Files Changed**
+- `src/app/page.tsx` - Translation toggle UI, Alt+T hotkey, visual indicator
+- `src/app/api/dictation/transcribe/route.ts` - Translation endpoint support, Groq /translations API
+- `src/app/api/dictation/refine/route.ts` - Translation-aware prompts with translation-ese correction
+- `src/lib/utils.ts` - Added `translate` and `translateHotkey` to Settings interface
+- `src/hooks/use-websocket.ts` - Updated SettingsUpdate interface
+- `mini-services/websocket-service/index.ts` - Pass `translate` and `translated` flags
+- `agent/localflow-agent.py` - Alt+T hotkey, toggle_translation() method, visual overlay
+
 ### Fixed - Keyboard Event Suppression in Terminal Applications
 
 **Issue:** Hotkey presses leak through to terminal apps (PowerShell, Windows Terminal), causing repeated characters like 'm' or 'l'

@@ -275,6 +275,8 @@ export interface DictationItem {
 export interface Settings {
   /** Global hotkey for triggering dictation */
   hotkey: string;
+  /** Hotkey to toggle translation mode */
+  translateHotkey: string;
   /** LLM refinement mode for text processing */
   refinementMode: "developer" | "concise" | "professional" | "raw";
   /** Where transcription/processing occurs */
@@ -283,6 +285,8 @@ export interface Settings {
   autoCopy: boolean;
   /** Whether sound effects are enabled */
   soundEnabled: boolean;
+  /** Whether to translate non-English audio to English (Whisper translation) */
+  translate: boolean;
 }
 
 /**
@@ -295,10 +299,12 @@ export interface Settings {
  */
 export const defaultSettings: Settings = {
   hotkey: "alt+v",
+  translateHotkey: "alt+t",
   refinementMode: "developer",
   processingMode: "cloud",
   autoCopy: true,
   soundEnabled: true,
+  translate: false,
 };
 
 /**

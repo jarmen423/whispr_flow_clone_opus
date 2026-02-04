@@ -112,6 +112,8 @@ interface ProcessAudioMessage {
   mode: "developer" | "concise" | "professional" | "raw" | "outline";
   /** Where processing should occur */
   processingMode?: "cloud" | "local";
+  /** Whether to translate non-English audio to English */
+  translate?: boolean;
   /** Client timestamp */
   timestamp: number;
 }
@@ -126,10 +128,14 @@ interface SettingsUpdate {
   type: "settings_update";
   /** Hotkey configuration */
   hotkey?: string;
+  /** Hotkey to toggle translation mode */
+  translateHotkey?: string;
   /** Refinement mode */
   mode?: string;
   /** Processing location preference */
   processingMode?: "cloud" | "local";
+  /** Whether to translate non-English audio to English */
+  translate?: boolean;
 }
 
 // ============================================
@@ -289,6 +295,7 @@ async function processAudio(socket: Socket, message: ProcessAudioMessage): Promi
       body: JSON.stringify({
         audio: message.audio,
         mode: message.processingMode || "cloud",
+        translate: message.translate || false,
       }),
     });
 
@@ -309,6 +316,7 @@ async function processAudio(socket: Socket, message: ProcessAudioMessage): Promi
           text: transcribeData.text,
           mode: message.mode,
           processingMode: message.processingMode || "cloud",
+          translated: message.translate || false,
         }),
       });
 

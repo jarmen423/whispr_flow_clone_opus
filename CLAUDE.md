@@ -160,7 +160,12 @@ Default hotkeys:
 
 - **`connection_confirmed`** - Sent on successful connection
 - **`dictation_result`** - Processing response with text
-- **`settings_update`** - Broadcast from UI when settings change
+- **`settings_update`** - Broadcast from UI when settings change (includes translate, hotkeys, mode)
+
+### Agent → Server Messages (Additional)
+
+- **`translation_toggled`** - Agent toggled translation mode via hotkey
+- **`process_audio`** - Now includes `translate` boolean field
 
 ### Server → UI Messages
 
@@ -210,6 +215,83 @@ The system supports five text refinement modes:
 
 System prompts are defined in `src/app/api/dictation/refine/route.ts`.
 
+## Translation Mode (🌐 Alt+T)
+
+LocalFlow supports real-time translation of non-English speech to English using Whisper's translation capability.
+
+### How It Works
+
+1. **Toggle Translation**: Press `Alt+T` (or use the UI toggle) to enable translation mode
+2. **Speak in any language**: Whisper auto-detects the source language
+3. **Get English output**: Speech is translated to English text
+4. **Translation-ese fix**: The refinement LLM corrects awkward grammar from raw translation
+
+### Translation Pipeline
+
+```
+Spanish Speech → Whisper Translation → Raw English (may have awkward grammar)
+                                       ↓
+                            Refinement LLM (with translation prompt)
+                                       ↓
+                            Natural, fluent English output
+```
+
+### Translation-Aware Post-Processing
+
+When `translated: true` is passed to the refinement API, the system prompt includes:
+
+```
+TRANSLATION NOTE: The input text is a raw machine translation from another language 
+(likely Spanish) to English. It may contain:
+- Non-native word order (e.g., "the car red" instead of "the red car")
+- Literal translations of idioms that don't make sense in English
+- Missing articles or incorrect prepositions
+
+Your task: Detect and correct any "translation-ese" or grammatical awkwardness.
+```
+
+This fixes common Whisper translation issues like:
+- "The car red" → "The red car"
+- "I have hunger" → "I'm hungry"
+- Incorrect article usage
+
+### Supported Languages
+
+Whisper supports 99+ languages including:
+- Spanish, French, German, Italian, Portuguese
+- Chinese, Japanese, Korean
+- Arabic, Hindi, Russian
+- And many more...
+
+### Requirements
+
+**Cloud Mode (Groq)**:
+- Uses dedicated `/v1/audio/translations` endpoint
+- Requires `whisper-large-v3` model (turbo does NOT support translation)
+- Fastest option (~50x real-time)
+
+**Networked-Local Mode**:
+- Whisper.cpp server supports `task=translate` parameter
+- Works with any Whisper.cpp server
+
+**Note**: LFM 2.5 Audio does NOT support translation (transcription only).
+
+### Configuration
+
+```bash
+# Optional: Set translation style prompt (max 224 tokens)
+TRANSLATION_PROMPT="Use technical terminology. Correct spelling of Kubernetes."
+
+# Optional: Customize translate hotkey (agent only)
+LOCALFLOW_TRANSLATE_HOTKEY=alt+t
+```
+
+### UI Indicators
+
+- **Blue "🌐 Translate" badge** appears in header when translation mode is active
+- **Settings dialog** shows translation toggle with `Alt+T` shortcut
+- **Toast notifications** confirm mode changes
+
 ### Outline Mode (Alt+M Format Mode)
 
 The `outline` mode uses **Cerebras GPT-OSS-120B** for fast, uncensored text formatting. This mode is activated with the **`Alt+M`** hotkey (or via `LOCALFLOW_FORMAT_HOTKEY`).
@@ -249,6 +331,8 @@ Set via environment variables:
 LOCALFLOW_WS_URL=http://localhost:3002    # WebSocket server URL
 LOCALFLOW_HOTKEY=alt+l                    # Global hotkey for raw mode (use letter keys)
 LOCALFLOW_FORMAT_HOTKEY=alt+m             # Hotkey for format/outline mode
+LOCALFLOW_TRANSLATE_HOTKEY=alt+t          # Hotkey to toggle translation mode
+LOCALFLOW_TRANSLATE=false                 # Default translation mode (true/false)
 LOCALFLOW_MODE=developer                  # Refinement mode
 LOCALFLOW_PROCESSING=networked-local      # Processing mode
 DEBUG=1                                   # Enable debug logging
@@ -258,6 +342,11 @@ DEBUG=1                                   # Enable debug logging
 - Use letter keys: `alt+l`, `alt+v`, `alt+d`, etc.
 - Avoid symbol keys like `/`, `?`, `-` (they share physical keys and are unreliable)
 - All Alt variants are supported: left Alt, right Alt, AltGr
+
+**Translation Hotkey (Alt+T)**
+- Toggles translation mode on/off
+- Shows visual overlay notification with current status
+- Syncs with web UI via WebSocket
 
 ## Important Implementation Details
 

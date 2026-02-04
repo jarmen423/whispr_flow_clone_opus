@@ -4,6 +4,7 @@ A fast, private, AI-powered dictation system with dual-mode hotkey support.
 
 **⚡ Lightning Fast** — Whisper transcription at ~50x real-time speed
 **🎯 Dual Hotkeys** — Raw mode for speed, Format mode for structure
+**🌐 Translation** — Speak any language, get English output (Alt+T)
 **🔒 Private** — Local processing options, no data retention
 **🤖 Smart Formatting** — Voice commands for lists, outlines, indentation
 
@@ -11,23 +12,74 @@ A fast, private, AI-powered dictation system with dual-mode hotkey support.
 
 ## Quick Start
 
+### Step 1: Install Dependencies
+
 ```bash
-# Install dependencies
-bun install
-cd agent && pip install -r requirements.txt && cd ..
+# Install Node dependencies
+npm install
 
-# Start all services
-bun run dev:all
+# Setup Python virtual environment for the agent
+cd agent
+python -m venv .venv-whispr
 
-# In another terminal, start the desktop agent
-cd agent && python localflow-agent.py
+# Activate venv (Windows)
+.venv-whispr\Scripts\activate
+# Activate venv (Linux/macOS)
+source .venv-whispr/bin/activate
+
+# Install Python dependencies
+pip install -r requirements.txt
+cd ..
+```
+
+### Step 2: Install CLI (Recommended)
+
+Run this **once** to install the `localflow` command globally:
+
+```powershell
+# Windows (PowerShell):
+.\scripts\install-cli.ps1
+
+# Linux / macOS:
+./scripts/install-cli.sh
+```
+
+**What this does:** Copies the startup script to `~/.local/bin/` and adds it to your PATH. After this, you can run `localflow` from **any directory**.
+
+### Step 3: Use LocalFlow
+
+```bash
+# Start all services (from anywhere on your system)
+localflow
+
+# Stop all services
+localflow --stop   # Linux/macOS
+localflow -stop    # Windows
 ```
 
 **Press and hold:**
 - `Alt+L` — Raw transcription (fastest, no post-processing)
 - `Alt+M` — Format mode (Cerebras LLM for outlines/lists)
+- `Alt+T` — Toggle translation mode (🌐 speak any language → English)
 
 Release to transcribe and auto-paste.
+
+---
+
+### Alternative: Manual Start (No CLI Install)
+
+If you prefer not to install the CLI command:
+
+```bash
+# Terminal 1: Start web services
+cd agent && source .venv-whispr/bin/activate && cd ..
+npm run dev:all
+
+# Terminal 2: Start desktop agent
+cd agent && source .venv-whispr/bin/activate && python localflow-agent.py
+```
+
+See [scripts/README.md](scripts/README.md) for more details.
 
 ---
 
@@ -93,11 +145,14 @@ CEREBRAS_MODEL=gpt-oss-120b
 # Hotkeys
 LOCALFLOW_HOTKEY=alt+l          # Raw mode
 LOCALFLOW_FORMAT_HOTKEY=alt+m   # Format mode
+LOCALFLOW_TRANSLATE_HOTKEY=alt+t # Toggle translation
 
 # Processing
 PROCESSING_MODE=cloud           # cloud | networked-local | local
-GROQ_API_KEY=your_key_here      # Get from https://groq.com/
-# free teir more than enough for most daily dictation use
+GROQ_API_KEY=your_key_here      # Get from https://groq.com/ (free tier is plenty)
+
+# Translation (optional)
+TRANSLATION_PROMPT="Correct technical terms"  # Style guidance for translation
 ```
 
 See `.env.example` for all options.
@@ -166,4 +221,25 @@ MIT
 **"No audio device"**
 → Ensure microphone is default input device
 
-See `agent/README.md` for more troubleshooting.
+**"localflow: command not found"**
+→ The CLI isn't installed or your PATH wasn't updated. Run the install script again and restart your terminal:
+```bash
+# Windows
+.\scripts\install-cli.ps1
+
+# Linux/macOS
+./scripts/install-cli.sh
+```
+
+**"Could not find LocalFlow project directory"**
+→ If you moved the project folder after installing the CLI, set the `LOCALFLOW_HOME` environment variable:
+
+```powershell
+# Windows (PowerShell - run once)
+[Environment]::SetEnvironmentVariable("LOCALFLOW_HOME", "C:\path\to\localflow", "User")
+
+# Linux/macOS (add to ~/.bashrc or ~/.zshrc)
+export LOCALFLOW_HOME="/path/to/localflow"
+```
+
+See `agent/README.md` and `scripts/README.md` for more troubleshooting.

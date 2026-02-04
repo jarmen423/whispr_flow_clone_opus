@@ -18,31 +18,37 @@ python localflow-agent.py
 
 ### 3. Use
 
-**Two hotkey modes are available:**
+**Three hotkey modes are available:**
 
 | Hotkey | Mode | Description |
 |--------|------|-------------|
 | `Alt+L` | Raw | Fast transcription without post-processing |
 | `Alt+M` | Format | Transcription with Cerebras LLM formatting (lists, outlines, indentation) |
+| `Alt+T` | Toggle | Toggle translation mode (🌐 speak any language → English) |
 
-1. Press and hold your chosen hotkey
+1. Press and hold your chosen hotkey (Alt+L or Alt+M)
 2. Speak clearly (include voice commands like "bullet", "new line" in format mode)
 3. Release the keys
 4. Text is automatically pasted at your cursor
+
+**Translation Mode:**
+Press `Alt+T` to toggle translation on/off. When enabled, speak in any language and get English output.
 
 ## Configuration
 
 Set these environment variables:
 
-| Variable                  | Default                    | Description                                                                |
-| ------------------------- | -------------------------- | -------------------------------------------------------------------------- |
-| `LOCALFLOW_WS_URL`        | `http://localhost:3002`     | WebSocket server URL                                                       |
-| `LOCALFLOW_HOTKEY`        | `alt+l`                    | Global hotkey for raw mode                                                 |
-| `LOCALFLOW_FORMAT_HOTKEY` | `alt+m`                    | Hotkey for format mode (uses Cerebras LLM for outlines/lists)              |
-| `LOCALFLOW_MODE`          | `developer`                | Refinement mode (developer, concise, professional, raw, outline)           |
-| `LOCALFLOW_PROCESSING`    | `cloud`                    | Processing mode (cloud, networked-local, local)                            |
-| `DEBUG`                   | -                          | Set to any value for debug logging                                         |
-| `CEREBRAS_API_KEY`        | -                          | Required for format mode (get from https://cloud.cerebras.ai/)             |
+| Variable                   | Default                    | Description                                                                |
+| -------------------------- | -------------------------- | -------------------------------------------------------------------------- |
+| `LOCALFLOW_WS_URL`         | `http://localhost:3002`     | WebSocket server URL                                                       |
+| `LOCALFLOW_HOTKEY`         | `alt+l`                    | Global hotkey for raw mode                                                 |
+| `LOCALFLOW_FORMAT_HOTKEY`  | `alt+m`                    | Hotkey for format mode (uses Cerebras LLM for outlines/lists)              |
+| `LOCALFLOW_TRANSLATE_HOTKEY` | `alt+t`                  | Hotkey to toggle translation mode                                          |
+| `LOCALFLOW_TRANSLATE`      | `false`                    | Default translation mode (true/false)                                      |
+| `LOCALFLOW_MODE`           | `developer`                | Refinement mode (developer, concise, professional, raw, outline)           |
+| `LOCALFLOW_PROCESSING`     | `cloud`                    | Processing mode (cloud, networked-local, local)                            |
+| `DEBUG`                    | -                          | Set to any value for debug logging                                         |
+| `CEREBRAS_API_KEY`         | -                          | Required for format mode (get from https://cloud.cerebras.ai/)             |
 
 ### Format Mode Voice Commands
 

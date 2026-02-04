@@ -71,17 +71,31 @@ const PROCESSING_MODE = process.env.PROCESSING_MODE || "networked-local";
 const ZAI_API_KEY = process.env.GROQ_API_KEY || process.env.ZAI_API_KEY || "";
 
 /**
- * Groq ASR API endpoint URL.
- * Uses Groq's OpenAI-compatible audio transcriptions endpoint.
+ * Groq ASR API endpoint URLs.
+ * Uses Groq's OpenAI-compatible audio endpoints.
+ * Translation requires the dedicated /translations endpoint.
  */
-const GROQ_ASR_API_BASE_URL =
+const GROQ_TRANSCRIPTION_URL =
   process.env.GROQ_ASR_API_BASE_URL || "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_TRANSLATION_URL = "https://api.groq.com/openai/v1/audio/translations";
 
 /**
  * ASR model identifier for Groq API.
  * Default: whisper-large-v3 (high quality, multilingual).
+ * Note: Only whisper-large-v3 supports translation. whisper-large-v3-turbo does NOT support translation.
  */
 const ZAI_ASR_MODEL = process.env.GROQ_ASR_MODEL || process.env.ZAI_ASR_MODEL || "whisper-large-v3";
+
+/**
+ * Model for translation (must be whisper-large-v3).
+ */
+const GROQ_TRANSLATION_MODEL = "whisper-large-v3";
+
+/**
+ * Optional prompt for translation style guidance.
+ * Helps with spelling of names and formatting preferences.
+ */
+const TRANSLATION_PROMPT = process.env.TRANSLATION_PROMPT || "";
 
 /**
  * URL for remote Whisper/LFM server in networked-local mode.
@@ -126,6 +140,8 @@ interface TranscribeRequest {
   audio: string;
   /** Processing mode override */
   mode?: "cloud" | "networked-local" | "local";
+  /** Whether to translate non-English audio to English */
+  translate?: boolean;
 }
 
 /**
@@ -184,6 +200,10 @@ function validateRequest(data: unknown): data is TranscribeRequest {
 
   if (req.mode && !["cloud", "networked-local", "local"].includes(req.mode as string)) {
     throw new Error("Invalid processing mode");
+  }
+
+  if (req.translate !== undefined && typeof req.translate !== "boolean") {
+    throw new Error("Invalid translate value (must be boolean)");
   }
 
   return true;
@@ -245,37 +265,49 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
 // ============================================
 
 /**
- * Transcribes audio using Groq's Whisper API.
+ * Transcribes or translates audio using Groq's Whisper API.
  *
  * Sends audio to Groq's cloud-based Whisper service for fast,
- * high-quality transcription. Supports the whisper-large-v3 model
- * with automatic language detection.
+ * high-quality transcription. When translate is true, uses the dedicated
+ * /translations endpoint which is the recommended approach per Groq docs.
  *
  * Purpose & Reasoning:
  *   Groq provides the fastest transcription with excellent accuracy.
- *   This is the recommended mode for users who prioritize speed
- *   and don't mind sending audio to a third-party service.
+ *   For translation, we use the dedicated /translations endpoint with
+ *   whisper-large-v3 (the only model that supports translation).
  *
  * Key Technologies/APIs:
  *   - fetch: POST to Groq ASR endpoint
  *   - FormData: Multipart form with audio file
  *   - AbortSignal.timeout: 60-second request timeout
- *   - Buffer.from: Base64 to binary conversion
+ *   - /v1/audio/translations: Dedicated translation endpoint
  *
  * @param audioBase64 - Base64-encoded audio data
+ * @param translate - Whether to translate non-English audio to English
  * @returns Object with transcribed text and processing time
  * @throws Error - On API errors, timeouts, or no speech detected
  *
  * @example
- * const result = await transcribeCloud(base64Audio);
+ * const result = await transcribeCloud(base64Audio, false);
  * console.log(result.text); // "Hello world"
  */
-async function transcribeCloud(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+async function transcribeCloud(
+  audioBase64: string,
+  translate: boolean = false
+): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
 
   if (!ZAI_API_KEY) {
     throw new Error(
       "GROQ_API_KEY is required for cloud mode. " + "Get your API key from: https://console.groq.com/keys"
+    );
+  }
+
+  // Translation requires whisper-large-v3 (turbo does not support translation)
+  if (translate && ZAI_ASR_MODEL !== GROQ_TRANSLATION_MODEL) {
+    console.warn(
+      `[Transcribe] Translation requires ${GROQ_TRANSLATION_MODEL}, but using ${ZAI_ASR_MODEL}. ` +
+        "Attempting anyway..."
     );
   }
 
@@ -287,11 +319,25 @@ async function transcribeCloud(audioBase64: string): Promise<{ text: string; pro
     const formData = new FormData();
     const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
     formData.append("file", audioBlob, "audio.wav");
-    formData.append("model", ZAI_ASR_MODEL);
     formData.append("response_format", "json");
 
+    // Determine endpoint and model based on translation mode
+    const endpoint = translate ? GROQ_TRANSLATION_URL : GROQ_TRANSCRIPTION_URL;
+    const model = translate ? GROQ_TRANSLATION_MODEL : ZAI_ASR_MODEL;
+
+    formData.append("model", model);
+
+    // Add optional prompt for style guidance (translation only)
+    // Prompt helps with: spelling of names, formatting preferences, punctuation style
+    // Limited to 224 tokens per Groq/OpenAI docs
+    if (translate && TRANSLATION_PROMPT) {
+      formData.append("prompt", TRANSLATION_PROMPT);
+    }
+
+    console.log(`[Transcribe] Using ${translate ? "translation" : "transcription"} endpoint: ${endpoint}`);
+
     // Groq API uses multipart/form-data with file upload
-    const response = await fetch(GROQ_ASR_API_BASE_URL, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${ZAI_API_KEY}`,
@@ -493,12 +539,17 @@ async function transcribeLFM(audioBase64: string): Promise<{ text: string; proce
  *   - fetch: POST to /inference endpoint
  *   - FormData: Multipart form with audio file
  *   - AbortSignal.timeout: 60-second timeout
+ *   - task=translate: Whisper translation parameter
  *
  * @param audioBase64 - Base64-encoded audio data
+ * @param translate - Whether to translate non-English audio to English
  * @returns Object with transcribed text and processing time
  * @throws Error - On API errors or connection failures
  */
-async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+async function transcribeWhisperCpp(
+  audioBase64: string,
+  translate: boolean = false
+): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
 
   if (!WHISPER_API_URL) {
@@ -517,6 +568,12 @@ async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string
     const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
     formData.append("file", audioBlob, "audio.wav");
     formData.append("response_format", "json");
+
+    // Add translation parameter if requested
+    // Whisper.cpp server supports task=translate to translate to English
+    if (translate) {
+      formData.append("task", "translate");
+    }
 
     // Call the Whisper API server
     const response = await fetch(`${WHISPER_API_URL}/inference`, {
@@ -571,10 +628,14 @@ async function transcribeWhisperCpp(audioBase64: string): Promise<{ text: string
  *   - AbortSignal.timeout: Quick detection timeouts
  *
  * @param audioBase64 - Base64-encoded audio data
+ * @param translate - Whether to translate non-English audio to English
  * @returns Object with transcribed text and processing time
  * @throws Error - If server unavailable or neither API detected
  */
-async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: string; processingTime: number }> {
+async function transcribeNetworkedLocal(
+  audioBase64: string,
+  translate: boolean = false
+): Promise<{ text: string; processingTime: number }> {
   if (!WHISPER_API_URL) {
     throw new Error(
       "WHISPER_API_URL is required for networked-local mode. " +
@@ -590,7 +651,7 @@ async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: st
 
   if (AUDIO_API_TYPE === "whisper") {
     console.log("[Transcribe] Using Whisper.cpp API");
-    return transcribeWhisperCpp(audioBase64);
+    return transcribeWhisperCpp(audioBase64, translate);
   }
 
   // Auto-detect: try to probe the server type
@@ -616,7 +677,7 @@ async function transcribeNetworkedLocal(audioBase64: string): Promise<{ text: st
 
     if (healthCheck && healthCheck.ok) {
       console.log("[Transcribe] Detected Whisper.cpp server (has /health endpoint)");
-      return transcribeWhisperCpp(audioBase64);
+      return transcribeWhisperCpp(audioBase64, translate);
     }
 
     // Default to LFM since that's what the user is setting up
@@ -787,17 +848,22 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transcrib
     }
 
     const mode = getEffectiveMode(body.mode);
+    const translate = body.translate === true;
 
     let result: { text: string; processingTime?: number };
 
     switch (mode) {
       case "cloud":
-        result = await transcribeCloud(body.audio);
+        result = await transcribeCloud(body.audio, translate);
         break;
       case "networked-local":
-        result = await transcribeNetworkedLocal(body.audio);
+        result = await transcribeNetworkedLocal(body.audio, translate);
         break;
       case "local":
+        // Local binary doesn't support translation yet
+        if (translate) {
+          console.warn("[Transcribe] Translation not supported in local binary mode, transcribing only");
+        }
         result = await transcribeLocalBinary(body.audio);
         break;
       default:

@@ -323,6 +323,8 @@ Processing: networked-local
 ============================================
 Registering hotkeys: ['<alt_l>+l', '<alt_r>+l', '<alt_gr>+l']
 Listening for hotkey: alt+l
+Format hotkey: alt+m
+Translate toggle: alt+t
 Press the hotkey to start recording, release to stop and transcribe.
 Press Ctrl+C to exit.
 ```
@@ -1167,13 +1169,19 @@ cd agent
 python localflow-agent.py
 ```
 
-### Default Hotkey
+### Default Hotkeys
 
-`Alt + L` (hold to record, release to transcribe)
+| Hotkey | Function |
+|--------|----------|
+| `Alt + L` | Raw mode: Hold to record, release to transcribe |
+| `Alt + M` | Format mode: Same, but with LLM formatting for outlines/lists |
+| `Alt + T` | Toggle translation mode (🌐 speak any language → English) |
 
 **Customize in `.env`:**
 ```bash
-LOCALFLOW_HOTKEY=alt+l  # Use letter keys (alt+l, alt+v, alt+d, etc.)
+LOCALFLOW_HOTKEY=alt+l              # Raw mode hotkey
+LOCALFLOW_FORMAT_HOTKEY=alt+m       # Format mode hotkey
+LOCALFLOW_TRANSLATE_HOTKEY=alt+t    # Translation toggle hotkey
 ```
 
 ### URLs

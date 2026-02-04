@@ -123,10 +123,14 @@ export interface UseWebSocketReturn {
 export interface SettingsUpdate {
   /** Hotkey combination string */
   hotkey?: string;
+  /** Hotkey to toggle translation mode */
+  translateHotkey?: string;
   /** Refinement mode */
   mode?: string;
   /** Where processing should occur */
   processingMode?: "cloud" | "local";
+  /** Whether to translate to English */
+  translate?: boolean;
 }
 
 /** WebSocket service URL from environment or default */

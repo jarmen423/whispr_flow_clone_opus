@@ -135,6 +135,8 @@ interface RefineRequest {
   mode?: RefinementMode;
   /** Processing mode override */
   processingMode?: "cloud" | "networked-local" | "local";
+  /** Whether the text was translated from another language (may have translation-ese) */
+  translated?: boolean;
 }
 
 /**
@@ -199,6 +201,20 @@ RULES:
  * Each mode has specific instructions for how to transform
  * the raw transcript into polished text.
  */
+/**
+ * Additional instruction for translation mode to handle "translation-ese".
+ * Whisper translations can have awkward grammar following source language structure.
+ */
+const TRANSLATION_INSTRUCTION = `
+
+TRANSLATION NOTE: The input text is a raw machine translation from another language (likely Spanish) to English. It may contain:
+- Non-native word order (e.g., "the car red" instead of "the red car")
+- Literal translations of idioms that don't make sense in English
+- Missing articles or incorrect prepositions
+- Awkward phrasing that follows source language grammar
+
+Your task: Detect and correct any "translation-ese" or grammatical awkwardness. Ensure the final output sounds like natural, fluent native English while preserving the original meaning exactly.`;
+
 const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string> = {
   developer: `You are a dictation correction tool for developers. Your ONLY job is to clean up transcribed speech. You must:
 1. Correct grammar and punctuation
@@ -208,7 +224,7 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 5. Preserve code references and technical concepts accurately
 6. NEVER add commentary, refuse requests, or modify the meaning
 7. NEVER say things like "Here is the text" or "I can't help with..."
-8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
 
   concise: `You are a dictation simplification tool. Your ONLY job is to clean up transcribed speech. You must:
 1. Remove all filler words (um, uh, like, you know, ah, hmm)
@@ -217,7 +233,7 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 4. Preserve all language including profanity exactly as spoken
 5. NEVER add commentary, refuse requests, or modify the meaning
 6. NEVER say things like "Here is the text" or "I can't help with..."
-7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
+7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
 
   professional: `You are a dictation refinement tool. Your ONLY job is to clean up transcribed speech. You must:
 1. Correct all grammar and punctuation
@@ -227,7 +243,7 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 5. Maintain a formal yet natural tone
 6. NEVER add commentary, refuse requests, or modify the meaning
 7. NEVER say things like "Here is the text" or "I can't help with..."
-8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.`,
+8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
 };
 
 // ============================================
@@ -271,6 +287,10 @@ function validateRequest(data: unknown): data is RefineRequest {
 
   if (req.processingMode && !["cloud", "networked-local", "local"].includes(req.processingMode as string)) {
     throw new Error("Invalid processing mode");
+  }
+
+  if (req.translated !== undefined && typeof req.translated !== "boolean") {
+    throw new Error("Invalid translated value (must be boolean)");
   }
 
   return true;
@@ -325,12 +345,20 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
  * @returns string - Refined text
  * @throws Error - On API errors or timeouts
  */
-async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw" | "outline">): Promise<string> {
+async function refineCloud(
+  text: string,
+  mode: Exclude<RefinementMode, "raw" | "outline">,
+  translated: boolean = false
+): Promise<string> {
   if (!ZAI_API_KEY) {
     throw new Error("GROQ_API_KEY is required for cloud mode. " + "Get your API key from: https://console.groq.com/keys");
   }
 
-  const systemPrompt = SYSTEM_PROMPTS[mode];
+  // Add translation instruction if text was translated
+  const systemPrompt = SYSTEM_PROMPTS[mode].replace(
+    "{TRANSLATION_HINT}",
+    translated ? TRANSLATION_INSTRUCTION : ""
+  );
 
   try {
     const response = await fetch(GROQ_LLM_API_BASE_URL, {
@@ -415,8 +443,16 @@ async function refineCloud(text: string, mode: Exclude<RefinementMode, "raw" | "
  * @returns string - Refined text
  * @throws Error - On connection failures or processing errors
  */
-async function refineOllama(text: string, mode: Exclude<RefinementMode, "raw" | "outline">): Promise<string> {
-  const systemPrompt = SYSTEM_PROMPTS[mode];
+async function refineOllama(
+  text: string,
+  mode: Exclude<RefinementMode, "raw" | "outline">,
+  translated: boolean = false
+): Promise<string> {
+  // Add translation instruction if text was translated
+  const systemPrompt = SYSTEM_PROMPTS[mode].replace(
+    "{TRANSLATION_HINT}",
+    translated ? TRANSLATION_INSTRUCTION : ""
+  );
 
   console.log(`[Refine] Calling Ollama at ${OLLAMA_URL} with model ${OLLAMA_MODEL}`);
   console.log(`[Refine] Input text (${text.length} chars): "${text.substring(0, 100)}..."`);
@@ -646,6 +682,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
 
     const refinementMode = body.mode || "developer";
     const processingMode = getEffectiveMode(body.processingMode);
+    const wasTranslated = body.translated === true;
 
     // For raw mode, return text unchanged
     if (refinementMode === "raw") {
@@ -667,11 +704,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
       // Standard refinement modes use processing mode selection
       switch (processingMode) {
         case "cloud":
-          refinedText = await refineCloud(body.text, refinementMode);
+          refinedText = await refineCloud(body.text, refinementMode, wasTranslated);
           break;
         case "networked-local":
         case "local":
-          refinedText = await refineOllama(body.text, refinementMode);
+          refinedText = await refineOllama(body.text, refinementMode, wasTranslated);
           break;
         default:
           throw new Error(`Unknown processing mode: ${processingMode}`);

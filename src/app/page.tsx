@@ -89,6 +89,22 @@ export default function LocalFlowPage() {
     setHistory(loadHistory());
   }, []);
 
+  // Keyboard shortcut: Alt+T to toggle translation mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt+T toggles translation mode
+      if (e.altKey && e.key === "t") {
+        e.preventDefault();
+        const newTranslate = !settings.translate;
+        updateSettings({ translate: newTranslate });
+        toast.info(newTranslate ? "Translation mode enabled" : "Translation mode disabled");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [settings.translate]);
+
   // Update audio level visualization
   const updateAudioLevel = useCallback(() => {
     if (analyserRef.current && isRecording) {
@@ -214,6 +230,7 @@ export default function LocalFlowPage() {
         body: JSON.stringify({
           audio: audioBase64,
           mode: settings.processingMode,
+          translate: settings.translate,
         }),
       });
 
@@ -236,6 +253,7 @@ export default function LocalFlowPage() {
             text: transcribeData.text,
             mode: settings.refinementMode,
             processingMode: settings.processingMode,
+            translated: settings.translate,
           }),
         });
 
@@ -313,8 +331,10 @@ export default function LocalFlowPage() {
     saveSettings(updated);
     sendSettings({
       hotkey: updated.hotkey,
+      translateHotkey: updated.translateHotkey,
       mode: updated.refinementMode,
       processingMode: updated.processingMode,
+      translate: updated.translate,
     });
   };
 
@@ -372,6 +392,13 @@ export default function LocalFlowPage() {
                 {status.agentOnline ? "Agent Online" : "Agent Offline"}
               </span>
             </div>
+
+            {/* Translation Mode Indicator */}
+            {settings.translate && (
+              <div className="flex items-center gap-2 rounded-full bg-blue-500/10 px-3 py-1.5 text-sm border border-blue-500/20">
+                <span className="text-blue-600 dark:text-blue-400 font-medium">🌐 Translate</span>
+              </div>
+            )}
 
             {/* Settings */}
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -493,6 +520,24 @@ export default function LocalFlowPage() {
                         checked={settings.soundEnabled}
                         onCheckedChange={(checked) =>
                           updateSettings({ soundEnabled: checked })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="flex items-center gap-2">
+                          Translate to English
+                          <kbd className="px-1.5 py-0.5 rounded bg-muted text-xs">Alt+T</kbd>
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Translate non-English speech to English (Whisper large-v3)
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.translate}
+                        onCheckedChange={(checked) =>
+                          updateSettings({ translate: checked })
                         }
                       />
                     </div>

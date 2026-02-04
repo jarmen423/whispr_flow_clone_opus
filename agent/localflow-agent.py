@@ -121,6 +121,8 @@ class Config:
             raw, outline) that determines how the LLM refines the text.
         processing_mode: Where processing occurs - "cloud", "networked-local",
             or "local" depending on infrastructure deployment.
+        translate: Whether to translate non-English audio to English using
+            Whisper's translation capability.
         heartbeat_interval: Seconds between keepalive pings to maintain
             WebSocket connection and detect network issues.
         paste_cooldown: Minimum seconds between paste operations to
@@ -140,10 +142,12 @@ class Config:
     dtype: str = "int16"  # 16-bit PCM
     hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+z")
     format_hotkey: str = os.getenv("LOCALFLOW_FORMAT_HOTKEY", "alt+m")
+    translate_hotkey: str = os.getenv("LOCALFLOW_TRANSLATE_HOTKEY", "alt+t")  # Toggle translation mode
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )  # developer, concise, professional, raw, outline
     processing_mode: str = os.getenv("PROCESSING_MODE", "networked-local")  # cloud, networked-local, local
+    translate: bool = os.getenv("LOCALFLOW_TRANSLATE", "false").lower() == "true"
     heartbeat_interval: int = 5
     paste_cooldown: float = 0.1
 
@@ -700,6 +704,7 @@ class LocalFlowAgent:
         processing_mode: Where processing occurs (cloud, local, etc.).
         hotkey: Current global hotkey configuration string.
         format_hotkey: LLM formatting hotkey configuration.
+        translate_hotkey: Hotkey to toggle translation mode.
         running: Boolean indicating if agent main loop is active.
         hotkey_pressed: Boolean tracking if hotkey is currently held.
         format_mode_active: Whether format hotkey was used.
@@ -741,8 +746,10 @@ class LocalFlowAgent:
         self.connected = False
         self.mode = CONFIG.mode
         self.processing_mode = CONFIG.processing_mode
+        self.translate = CONFIG.translate
         self.hotkey = CONFIG.hotkey
         self.format_hotkey = CONFIG.format_hotkey
+        self.translate_hotkey = CONFIG.translate_hotkey
         self.running = True
         self.hotkey_pressed = False
         self.format_mode_active = False  # True when using Alt+M formatting mode
@@ -835,7 +842,7 @@ class LocalFlowAgent:
             """Handle settings update from server.
 
             Updates agent configuration based on server-sent settings
-            changes. Supports updating mode, processingMode, and hotkey
+            changes. Supports updating mode, processingMode, translate, and hotkey
             configurations dynamically without restart.
 
             Key Technologies/APIs:
@@ -846,6 +853,7 @@ class LocalFlowAgent:
                 data: Dictionary containing settings to update:
                     - mode (str): New processing mode
                     - processingMode (str): New processing location
+                    - translate (bool): Whether to translate to English
                     - hotkey (str): New hotkey configuration
             """
             if "mode" in data:
@@ -856,9 +864,50 @@ class LocalFlowAgent:
                 self.processing_mode = data["processingMode"]
                 log_info(f"Processing mode updated: {self.processing_mode}")
 
+            if "translate" in data:
+                self.translate = data["translate"]
+                log_info(f"Translate updated: {self.translate}")
+
             if "hotkey" in data:
                 self.hotkey = data["hotkey"]
                 log_info(f"Hotkey updated: {self.hotkey}")
+
+            if "translateHotkey" in data:
+                self.translate_hotkey = data["translateHotkey"]
+                log_info(f"Translate hotkey updated: {self.translate_hotkey}")
+
+    def toggle_translation(self) -> None:
+        """Toggle translation mode on/off.
+
+        Switches the translate setting between True and False,
+        shows a visual notification via the overlay, and notifies
+        the server of the change.
+        """
+        self.translate = not self.translate
+        status = "ON" if self.translate else "OFF"
+        log_info(f"Translation mode toggled: {status}")
+
+        # Show visual notification
+        self.overlay.show()
+        self.overlay.update_text(f"🌐 Translate: {status}")
+
+        # Hide overlay after 1.5 seconds
+        def hide_overlay():
+            time.sleep(1.5)
+            self.overlay.hide()
+
+        threading.Thread(target=hide_overlay, daemon=True).start()
+
+        # Notify server of the change if connected
+        if self.connected:
+            try:
+                self.sio.emit(
+                    "translation_toggled",
+                    {"translate": self.translate, "timestamp": int(time.time() * 1000)},
+                    namespace="/agent",
+                )
+            except Exception as e:
+                log_error(f"Failed to notify server of translation toggle: {e}")
 
     def connect(self) -> bool:
         """Establish WebSocket connection to the LocalFlow server.
@@ -1006,6 +1055,7 @@ class LocalFlowAgent:
                             "audio": audio_base64,
                             "mode": effective_mode,
                             "processingMode": self.processing_mode,
+                            "translate": self.translate,
                             "timestamp": int(time.time() * 1000),
                         },
                         namespace="/agent",
@@ -1159,10 +1209,12 @@ class LocalFlowAgent:
         # Parse hotkey configurations
         parts = self.hotkey.lower().replace("+", " ").split()
         format_parts = self.format_hotkey.lower().replace("+", " ").split()
+        translate_parts = self.translate_hotkey.lower().replace("+", " ").split()
 
         # Store target characters for release detection
         self._hotkey_char = parts[1] if len(parts) >= 2 else "l"
         self._format_hotkey_char = format_parts[1] if len(format_parts) >= 2 else "m"
+        self._translate_hotkey_char = translate_parts[1] if len(translate_parts) >= 2 else "t"
 
         # Track currently pressed keys
         self.pressed_keys = set()
@@ -1218,6 +1270,10 @@ class LocalFlowAgent:
                     self._hotkey_triggered = True
                     self._last_hotkey_was_format = True
                     self._on_hotkey_press(format_mode=True)
+                    return False  # Suppress the hotkey event
+                elif is_hotkey_char_pressed(self._translate_hotkey_char):
+                    # Toggle translation mode (don't set _hotkey_triggered, this is a toggle not a hold)
+                    self.toggle_translation()
                     return False  # Suppress the hotkey event
 
             # Suppress Alt+hotkey_char combinations even if already triggered
@@ -1370,6 +1426,8 @@ class LocalFlowAgent:
         # Set up hotkey listener
         listener = self._setup_hotkey_listener()
         log_info(f"Listening for hotkey: {self.hotkey}")
+        log_info(f"Format hotkey: {self.format_hotkey}")
+        log_info(f"Translate toggle: {self.translate_hotkey}")
         log_info("Press the hotkey to start recording, release to stop and transcribe.")
         log_info("Press Ctrl+C to exit.")
 
