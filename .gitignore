@@ -66,3 +66,5 @@ models/*.gguf
 agent/temp/
 temp/
 /tmp/localflow/
+agent/localflow-agent.py.bak
+.gitignore

@@ -41,7 +41,7 @@
  *   --background: 222.2 84% 4.9%  (HSL values)
  *
  *   This format allows easy opacity modification via hsl() function:
- *   background: hsl(var(--background) / 0.8);  /* 80% opacity */
+ *   background: hsl(var(--background) / 0.8);  (80 percent opacity)
  *
  * @module app/globals.css
  */
