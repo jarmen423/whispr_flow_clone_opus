@@ -35,6 +35,18 @@ powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\.local\bin\localflow.ps1
 '@
 Set-Content -Path $WrapperScript -Value $WrapperContent -Force
 
+# Set LOCALFLOW_HOME environment variable to current project directory
+$ProjectDir = Resolve-Path (Join-Path $PSScriptRoot "..") | Select-Object -ExpandProperty Path
+$CurrentHome = [Environment]::GetEnvironmentVariable("LOCALFLOW_HOME", "User")
+
+if ($CurrentHome -ne $ProjectDir) {
+    Write-Color "Setting LOCALFLOW_HOME to: $ProjectDir" "Yellow"
+    [Environment]::SetEnvironmentVariable("LOCALFLOW_HOME", $ProjectDir, "User")
+    Write-Color "LOCALFLOW_HOME environment variable updated!" "Green"
+} else {
+    Write-Color "LOCALFLOW_HOME already set correctly" "Gray"
+}
+
 # Check if LocalBin is in PATH
 $PathVar = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($PathVar -notlike "*$LocalBin*") {
