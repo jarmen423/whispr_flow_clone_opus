@@ -8,7 +8,11 @@
 # 3. Then run from anywhere as: localflow [-stop]
 
 param(
-    [switch]$stop
+    [switch]$stop,
+    [switch]$formatSelection,
+    [switch]$chooseFormat,
+    [ValidateSet("markdown", "json", "jsonl", "csv")]
+    [string]$formatTarget = "markdown"
 )
 
 # Determine project root
@@ -71,6 +75,21 @@ if ($stop) {
     } | Stop-Process -Force
     
     Write-Host "Stopped!" -ForegroundColor Red
+} elseif ($formatSelection) {
+    Write-Host "Formatting selected text with LocalFlow..." -ForegroundColor Cyan
+
+    if (-not (Test-Path $VenvActivate)) {
+        Write-Error "Virtual environment not found at: $VenvActivate"
+        exit 1
+    }
+
+    $formatArgs = @("--format-selection", "--format-target", $formatTarget)
+    if ($chooseFormat) {
+        $formatArgs += "--choose-format"
+    }
+
+    $agentCommand = "cd '$ProjectRoot/agent'; & '$VenvActivate'; python localflow-agent.py $($formatArgs -join ' ')"
+    powershell -Command $agentCommand
 } else {
     Write-Host "Starting LocalFlow services..." -ForegroundColor Cyan
     Write-Host "Project root: $ProjectRoot" -ForegroundColor Gray

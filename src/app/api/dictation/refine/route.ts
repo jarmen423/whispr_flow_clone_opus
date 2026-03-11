@@ -122,6 +122,8 @@ const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
  * - outline: Markdown structure formatting
  */
 type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline";
+type RefineOperation = "dictation_refine" | "text_format";
+type FormatTarget = "markdown" | "json" | "jsonl" | "csv";
 
 /**
  * Request body for refinement endpoint.
@@ -131,8 +133,12 @@ type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outlin
 interface RefineRequest {
   /** Text to refine */
   text: string;
+  /** Requested refinement operation */
+  operation?: RefineOperation;
   /** Refinement mode to use */
   mode?: RefinementMode;
+  /** Target output format for text formatting operations */
+  formatTarget?: FormatTarget;
   /** Processing mode override */
   processingMode?: "cloud" | "networked-local" | "local";
   /** Whether the text was translated from another language (may have translation-ese) */
@@ -194,6 +200,46 @@ RULES:
 4. Output ONLY the formatted markdown text
 5. Maintain the exact meaning, only add structure
 6. Use proper markdown syntax (- for bullets, 1. 2. 3. for numbers)`;
+
+const FORMAT_PROMPTS: Record<FormatTarget, string> = {
+  markdown: `You are a text formatting assistant. Rewrite the input as clean, readable Markdown.
+
+RULES:
+1. Output only the final Markdown
+2. Never add commentary or code fences unless the content itself requires them
+3. Preserve meaning exactly while improving structure
+4. Use headings, bullet lists, numbered lists, tables, and code fences only when they fit the content naturally
+5. Preserve profanity, code references, names, and technical terms exactly
+6. Do not invent facts or expand the content`,
+
+  json: `You are a structured data formatter. Convert the input into valid pretty-printed JSON.
+
+RULES:
+1. Output only valid JSON
+2. Do not wrap the JSON in markdown fences
+3. Preserve the source meaning exactly
+4. Infer a sensible JSON shape only when the content clearly supports one
+5. If the input cannot be represented as trustworthy structured JSON without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  jsonl: `You are a structured data formatter. Convert the input into valid JSON Lines.
+
+RULES:
+1. Output only JSONL, with one valid JSON object per line
+2. Do not wrap the output in markdown fences
+3. Preserve the source meaning exactly
+4. Use a consistent object shape across lines
+5. If the input cannot be segmented into trustworthy JSON objects without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  csv: `You are a structured data formatter. Convert the input into valid CSV.
+
+RULES:
+1. Output only CSV text
+2. Include a header row
+3. Use consistent column counts for every row
+4. Quote fields only when needed by CSV rules
+5. Preserve the source meaning exactly
+6. If the input cannot be converted into a trustworthy table without guessing, respond with exactly: __FORMAT_ERROR__`,
+};
 
 /**
  * System prompts for standard refinement modes.
@@ -281,8 +327,16 @@ function validateRequest(data: unknown): data is RefineRequest {
     throw new Error("Text too long (max 10,000 characters)");
   }
 
+  if (req.operation && !["dictation_refine", "text_format"].includes(req.operation as string)) {
+    throw new Error("Invalid refine operation");
+  }
+
   if (req.mode && !["developer", "concise", "professional", "raw", "outline"].includes(req.mode as string)) {
     throw new Error("Invalid refinement mode");
+  }
+
+  if (req.formatTarget && !["markdown", "json", "jsonl", "csv"].includes(req.formatTarget as string)) {
+    throw new Error("Invalid format target");
   }
 
   if (req.processingMode && !["cloud", "networked-local", "local"].includes(req.processingMode as string)) {
@@ -561,9 +615,13 @@ async function refineOllama(
  * @throws Error - On API errors or connection failures
  */
 async function refineCerebras(text: string): Promise<string> {
+  return refineCerebrasWithPrompt(text, OUTLINE_PROMPT, "outline mode");
+}
+
+async function refineCerebrasWithPrompt(text: string, prompt: string, modeLabel: string): Promise<string> {
   if (!CEREBRAS_API_KEY) {
     throw new Error(
-      "CEREBRAS_API_KEY is required for outline mode. " + "Get your API key from: https://cloud.cerebras.ai/"
+      `CEREBRAS_API_KEY is required for ${modeLabel}. Get your API key from: https://cloud.cerebras.ai/`
     );
   }
 
@@ -579,7 +637,7 @@ async function refineCerebras(text: string): Promise<string> {
       body: JSON.stringify({
         model: CEREBRAS_MODEL,
         messages: [
-          { role: "system", content: OUTLINE_PROMPT },
+          { role: "system", content: prompt },
           { role: "user", content: text },
         ],
         temperature: 0.3,
@@ -625,6 +683,16 @@ async function refineCerebras(text: string): Promise<string> {
     }
     throw new Error("Unknown error during Cerebras refinement");
   }
+}
+
+async function formatText(text: string, formatTarget: FormatTarget): Promise<string> {
+  const formatted = await refineCerebrasWithPrompt(text, FORMAT_PROMPTS[formatTarget], `${formatTarget} formatting`);
+
+  if (formatted.trim() === "__FORMAT_ERROR__") {
+    throw new Error(`Unable to convert input into ${formatTarget.toUpperCase()} without guessing`);
+  }
+
+  return formatted;
 }
 
 // ============================================
@@ -680,9 +748,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
       );
     }
 
+    const operation: RefineOperation = body.operation || "dictation_refine";
     const refinementMode = body.mode || "developer";
+    const formatTarget: FormatTarget = body.formatTarget || "markdown";
     const processingMode = getEffectiveMode(body.processingMode);
     const wasTranslated = body.translated === true;
+
+    if (operation === "text_format") {
+      const refinedText = await formatText(body.text, formatTarget);
+
+      return NextResponse.json({
+        success: true,
+        refinedText,
+        originalWordCount: countWords(body.text),
+        refinedWordCount: countWords(refinedText),
+        processingMode,
+      });
+    }
 
     // For raw mode, return text unchanged
     if (refinementMode === "raw") {

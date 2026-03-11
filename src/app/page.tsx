@@ -332,9 +332,12 @@ export default function LocalFlowPage() {
     sendSettings({
       hotkey: updated.hotkey,
       translateHotkey: updated.translateHotkey,
+      selectionFormatHotkey: updated.selectionFormatHotkey,
       mode: updated.refinementMode,
+      selectionFormatDefaultTarget: updated.selectionFormatDefaultTarget,
       processingMode: updated.processingMode,
       translate: updated.translate,
+      selectionFormatterEnabled: updated.selectionFormatterEnabled,
     });
   };
 
@@ -421,7 +424,7 @@ export default function LocalFlowPage() {
                     <Label>Processing Mode</Label>
                     <Select
                       value={settings.processingMode}
-                      onValueChange={(value: "cloud" | "local") =>
+                      onValueChange={(value: "cloud" | "networked-local" | "local") =>
                         updateSettings({ processingMode: value })
                       }
                     >
@@ -435,6 +438,12 @@ export default function LocalFlowPage() {
                             <span>Cloud (Fast)</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="networked-local">
+                          <div className="flex items-center gap-2">
+                            <Wifi className="h-4 w-4" />
+                            <span>Networked Local</span>
+                          </div>
+                        </SelectItem>
                         <SelectItem value="local">
                           <div className="flex items-center gap-2">
                             <HardDrive className="h-4 w-4" />
@@ -446,6 +455,8 @@ export default function LocalFlowPage() {
                     <p className="text-xs text-muted-foreground">
                       {settings.processingMode === "cloud"
                         ? "Fast processing with usage-based pricing"
+                        : settings.processingMode === "networked-local"
+                        ? "Use your remote Whisper/Ollama servers on the network"
                         : "Free offline processing on your machine"}
                     </p>
                   </div>
@@ -455,7 +466,9 @@ export default function LocalFlowPage() {
                     <Label>Refinement Mode</Label>
                     <Select
                       value={settings.refinementMode}
-                      onValueChange={(value: "developer" | "concise" | "professional" | "raw") =>
+                      onValueChange={(
+                        value: "developer" | "concise" | "professional" | "raw" | "outline"
+                      ) =>
                         updateSettings({ refinementMode: value })
                       }
                     >
@@ -466,6 +479,7 @@ export default function LocalFlowPage() {
                         <SelectItem value="developer">Developer</SelectItem>
                         <SelectItem value="concise">Concise</SelectItem>
                         <SelectItem value="professional">Professional</SelectItem>
+                        <SelectItem value="outline">Outline</SelectItem>
                         <SelectItem value="raw">Raw (No Refinement)</SelectItem>
                       </SelectContent>
                     </Select>
@@ -482,6 +496,7 @@ export default function LocalFlowPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="alt+l">Alt + L</SelectItem>
                         <SelectItem value="alt+v">Alt + V</SelectItem>
                         <SelectItem value="ctrl+shift+v">Ctrl + Shift + V</SelectItem>
                         <SelectItem value="cmd+shift+v">Cmd + Shift + V</SelectItem>
@@ -492,8 +507,63 @@ export default function LocalFlowPage() {
                     </p>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>Selection Format Hotkey</Label>
+                    <Select
+                      value={settings.selectionFormatHotkey}
+                      onValueChange={(value) => updateSettings({ selectionFormatHotkey: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ctrl+shift+j">Ctrl + Shift + J</SelectItem>
+                        <SelectItem value="ctrl+shift+k">Ctrl + Shift + K</SelectItem>
+                        <SelectItem value="ctrl+shift+f">Ctrl + Shift + F</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Formats the currently selected text without recording audio
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Selection Format Default</Label>
+                    <Select
+                      value={settings.selectionFormatDefaultTarget}
+                      onValueChange={(value: "markdown" | "json" | "jsonl" | "csv") =>
+                        updateSettings({ selectionFormatDefaultTarget: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="markdown">Markdown</SelectItem>
+                        <SelectItem value="json">JSON</SelectItem>
+                        <SelectItem value="jsonl">JSONL</SelectItem>
+                        <SelectItem value="csv">CSV</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Toggles */}
                   <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>Selected-text formatter</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Enable the desktop hotkey for formatting highlighted text
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.selectionFormatterEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSettings({ selectionFormatterEnabled: checked })
+                        }
+                      />
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <div>
                         <Label>Auto-copy to clipboard</Label>
@@ -610,15 +680,23 @@ export default function LocalFlowPage() {
         <Alert variant={settings.processingMode === "cloud" ? "default" : "success"}>
           {settings.processingMode === "cloud" ? (
             <Zap className="h-4 w-4" />
+          ) : settings.processingMode === "networked-local" ? (
+            <Wifi className="h-4 w-4" />
           ) : (
             <HardDrive className="h-4 w-4" />
           )}
           <AlertTitle>
-            {settings.processingMode === "cloud" ? "Cloud Mode" : "Local Mode"}
+            {settings.processingMode === "cloud"
+              ? "Cloud Mode"
+              : settings.processingMode === "networked-local"
+              ? "Networked Local Mode"
+              : "Local Mode"}
           </AlertTitle>
           <AlertDescription>
             {settings.processingMode === "cloud"
               ? "Using cloud processing for fast, accurate transcription"
+              : settings.processingMode === "networked-local"
+              ? "Using remote Whisper/Ollama services on your network"
               : "Processing locally - completely free and private"}
           </AlertDescription>
         </Alert>

@@ -111,7 +111,7 @@ interface ProcessAudioMessage {
   /** Refinement mode for text processing */
   mode: "developer" | "concise" | "professional" | "raw" | "outline";
   /** Where processing should occur */
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
   translate?: boolean;
   /** Client timestamp */
@@ -130,12 +130,18 @@ interface SettingsUpdate {
   hotkey?: string;
   /** Hotkey to toggle translation mode */
   translateHotkey?: string;
+  /** Hotkey to format selected text */
+  selectionFormatHotkey?: string;
   /** Refinement mode */
   mode?: string;
+  /** Default target for selected-text formatting */
+  selectionFormatDefaultTarget?: "markdown" | "json" | "jsonl" | "csv";
   /** Processing location preference */
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
   translate?: boolean;
+  /** Whether selected-text formatting is enabled */
+  selectionFormatterEnabled?: boolean;
 }
 
 // ============================================

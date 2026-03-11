@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed - Desktop Agent Startup Crash From Formatter Hotkey Parsing
+
+**Issue:** The selected-text formatter hotkey parser misread `Ctrl+Shift+J` and registered `shift` as the terminal key. That caused the desktop agent to crash during startup with `ValueError: shift`, which made `Alt+L` appear broken because the hotkey listener never came up.
+
+**Solution**
+- Corrected `ctrl+shift+<key>` parsing in the desktop agent so the terminal key is read from the third token
+- Preserved `Ctrl+Shift+J` as the selected-text formatter default without interfering with dictation hotkeys
+- Verified the agent now stays running after hotkey registration
+
+**Files Changed**
+- `agent/localflow-agent.py` - Fixed selected-text formatter hotkey parsing during listener setup
+- `docs/bug-reports/2026-03-11-agent-hotkey-startup-crash.md` - Added regression write-up and validation notes
+- `AGENTS.md` - Added repo guidance for hotkey parsing and startup verification
+
+### Added - Selected-Text Formatter
+
+**New Feature:** Format highlighted text without recording audio.
+
+**How It Works**
+- Highlight existing text in any app
+- Press `Ctrl+Shift+J` to format the selection without using the microphone
+- The agent copies the selection, sends it to the formatting API, and pastes the formatted result back
+- The formatted result stays on the clipboard after completion
+
+**Supported Output Targets**
+- `Markdown` (default)
+- `JSON`
+- `JSONL`
+- `CSV`
+
+**Key Features**
+- **Separate Hotkey Path**: Selected-text formatting now uses its own hotkey and does not share the dictation recording flow
+- **Cerebras Formatting Backend**: Formatting requests use a dedicated `text_format` API operation
+- **Selection-Aware Workflow**: The desktop agent captures highlighted text via clipboard copy, formats it, and pastes the result back
+- **Settings Support**: The web UI now exposes selected-text formatter enablement, hotkey selection, and default output target
+- **Chooser Command Path**: A separate command path exists for manual format selection via `whispr-flow -formatSelection`
+
+**Files Changed**
+- `agent/localflow-agent.py` - Added selected-text formatting flow, separate hotkey handling, and format chooser command path
+- `src/app/api/dictation/refine/route.ts` - Added `text_format` operation and per-target prompts for Markdown, JSON, JSONL, and CSV
+- `src/app/page.tsx` - Added selected-text formatter settings UI
+- `src/lib/utils.ts` - Added selected-text formatter settings and migration from old Alt-based hotkeys
+- `src/hooks/use-websocket.ts` - Extended settings sync for selected-text formatter options
+- `mini-services/websocket-service/index.ts` - Extended settings payload for selected-text formatter options
+- `whispr-flow.ps1` - Added `-formatSelection`, `-chooseFormat`, and `-formatTarget` options
+
+### Added - Formatter Status Overlay
+
+**New Feature:** Visual status feedback for selected-text formatting requests.
+
+**What Users See**
+- Request acknowledgment when the formatting hotkey is pressed
+- A processing state while the formatting request is in flight
+- Success, no-selection, disabled, and failure states after completion
+
+**Implementation Details**
+- Extended the existing overlay to support both animated recording mode and text-only transient status mode
+- Hid the overlay before paste operations to avoid interfering with focus during replacement
+
+**Files Changed**
+- `agent/recording_overlay.py` - Added status overlay mode and transient message rendering
+- `agent/localflow-agent.py` - Added formatter request/progress/success/error overlay states
+
+### Fixed - Selected-Text Formatter Hotkey Collision
+
+**Issue:** The original selected-text formatter hotkey lived in the Alt keyspace, which conflicted with the dictation hotkeys and could hijack normal `Alt+L` / `Alt+M` behavior.
+
+**Solution**
+- Moved the selected-text formatter default hotkey to `Ctrl+Shift+J`
+- Reserved Alt-based combinations for recording and translation workflows only
+- Added a migration so older saved `Alt+J` / `Alt+K` settings are automatically upgraded
+
+**Result**
+- `Alt+L` remains raw dictation
+- `Alt+M` remains microphone + markdown formatting
+- `Ctrl+Shift+J` formats highlighted text without microphone access
+
+**Files Changed**
+- `agent/localflow-agent.py` - Normalized selection formatter hotkeys and registered separate Ctrl/Shift combinations
+- `src/lib/utils.ts` - Migrated legacy Alt-based selection formatter hotkeys
+- `src/app/page.tsx` - Updated formatter hotkey options in settings
+
 ### Added - Translation Mode (🌐 Speak Any Language → English)
 
 **New Feature:** Real-time translation of non-English speech to English with translation-ese correction.

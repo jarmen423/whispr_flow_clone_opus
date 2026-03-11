@@ -259,9 +259,9 @@ export interface DictationItem {
   /** Duration of recording in seconds */
   duration: number;
   /** Refinement mode used (developer, concise, professional, raw) */
-  mode: "developer" | "concise" | "professional" | "raw";
-  /** Where processing occurred (cloud or local) */
-  processingMode: "cloud" | "local";
+  mode: "developer" | "concise" | "professional" | "raw" | "outline";
+  /** Where processing occurred */
+  processingMode: "cloud" | "networked-local" | "local";
 }
 
 /**
@@ -277,16 +277,22 @@ export interface Settings {
   hotkey: string;
   /** Hotkey to toggle translation mode */
   translateHotkey: string;
+  /** Global hotkey for formatting selected text */
+  selectionFormatHotkey: string;
   /** LLM refinement mode for text processing */
-  refinementMode: "developer" | "concise" | "professional" | "raw";
+  refinementMode: "developer" | "concise" | "professional" | "raw" | "outline";
+  /** Default target when formatting selected text */
+  selectionFormatDefaultTarget: "markdown" | "json" | "jsonl" | "csv";
   /** Where transcription/processing occurs */
-  processingMode: "cloud" | "local";
+  processingMode: "cloud" | "networked-local" | "local";
   /** Whether to automatically copy results to clipboard */
   autoCopy: boolean;
   /** Whether sound effects are enabled */
   soundEnabled: boolean;
   /** Whether to translate non-English audio to English (Whisper translation) */
   translate: boolean;
+  /** Whether selected-text formatting is enabled in the desktop agent */
+  selectionFormatterEnabled: boolean;
 }
 
 /**
@@ -298,13 +304,16 @@ export interface Settings {
  * @constant {Settings}
  */
 export const defaultSettings: Settings = {
-  hotkey: "alt+v",
+  hotkey: "alt+l",
   translateHotkey: "alt+t",
+  selectionFormatHotkey: "ctrl+shift+j",
   refinementMode: "developer",
+  selectionFormatDefaultTarget: "markdown",
   processingMode: "cloud",
   autoCopy: true,
   soundEnabled: true,
   translate: false,
+  selectionFormatterEnabled: true,
 };
 
 /**
@@ -355,7 +364,16 @@ export function loadSettings(): Settings {
     const stored = localStorage.getItem("localflow-settings");
     if (stored) {
       try {
-        return { ...defaultSettings, ...JSON.parse(stored) };
+        const parsed = { ...defaultSettings, ...JSON.parse(stored) } as Settings;
+
+        if (
+          parsed.selectionFormatHotkey === "alt+j" ||
+          parsed.selectionFormatHotkey === "alt+k"
+        ) {
+          parsed.selectionFormatHotkey = defaultSettings.selectionFormatHotkey;
+        }
+
+        return parsed;
       } catch {
         return defaultSettings;
       }

@@ -158,6 +158,10 @@ class RecordingOverlay:
         # Animation state
         self.phase = 0.0
         self.shimmer_phase = 0.0
+        self.mode = "recording"
+        self.status_text = "Recording..."
+        self.status_bg = "#2d2d44"
+        self.status_fg = "#ffffff"
 
     def _create_window(self) -> None:
         """Create and configure the Tkinter overlay window.
@@ -186,7 +190,7 @@ class RecordingOverlay:
             that will run mainloop), not from arbitrary threads.
         """
         self.root = tk.Tk()
-        self.root.title("Recording")
+        self.root.title("LocalFlow")
 
         # Make it a tool window (no taskbar entry)
         self.root.overrideredirect(True)
@@ -216,10 +220,46 @@ class RecordingOverlay:
         )
         self.canvas.pack()
 
-        # Draw rounded background
+        # Draw initial frame
+        self._draw_background(self.status_bg)
+        if self.mode == "recording":
+            self._draw_frame()
+        else:
+            self._draw_status_frame()
+
+    def _draw_background(self, fill: str, outline: str = "#4a4a6a") -> None:
+        if not self.canvas:
+            return
+
+        self.canvas.delete("background")
         self._draw_rounded_rect(
-            2, 2, self.width - 2, self.height - 2, self.corner_radius, fill="#2d2d44", outline="#4a4a6a"
+            2, 2, self.width - 2, self.height - 2, self.corner_radius, fill=fill, outline=outline, tags="background"
         )
+
+    def _draw_status_frame(self) -> None:
+        """Render a text-only status message overlay."""
+        if not self.canvas:
+            return
+
+        try:
+            self.canvas.delete("bars")
+            self.canvas.delete("shimmer")
+            self.canvas.delete("rec")
+            self.canvas.delete("status")
+        except tk.TclError:
+            return
+
+        self._draw_background(self.status_bg, outline=self.status_bg)
+        self.canvas.create_text(
+            self.width / 2,
+            self.height / 2,
+            text=self.status_text,
+            fill=self.status_fg,
+            font=("Segoe UI", 10, "bold"),
+            tags="status",
+        )
+
+        self.root.update_idletasks()
 
     def _draw_rounded_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs) -> int:
         """Draw a rounded rectangle on the canvas.
@@ -301,7 +341,10 @@ class RecordingOverlay:
             return
 
         try:
-            self._draw_frame()
+            if self.mode == "recording":
+                self._draw_frame()
+            else:
+                self._draw_status_frame()
             # Schedule next frame using after() - this is thread-safe
             self.root.after(30, self._animate)  # ~30 FPS
         except tk.TclError:
@@ -419,6 +462,10 @@ class RecordingOverlay:
             if self.is_visible:
                 return
             self.is_visible = True
+            self.mode = "recording"
+            self.status_bg = "#2d2d44"
+            self.status_fg = "#ffffff"
+            self.status_text = "Recording..."
 
         def _show_window():
             self._create_window()
@@ -429,6 +476,43 @@ class RecordingOverlay:
 
         # Run in a separate thread to not block
         threading.Thread(target=_show_window, daemon=True).start()
+
+    def show_status(self, text: str, bg_color: str = "#1f3b5b", fg_color: str = "#ffffff", duration: float = 1.2) -> None:
+        """Display a transient status message overlay."""
+        with self._lock:
+            self.mode = "status"
+            self.status_text = text
+            self.status_bg = bg_color
+            self.status_fg = fg_color
+            should_create = not self.is_visible
+            if should_create:
+                self.is_visible = True
+
+        if should_create:
+            def _show_window():
+                self._create_window()
+                self.animation_running = True
+                self.root.after(30, self._animate)
+                self.root.mainloop()
+
+            threading.Thread(target=_show_window, daemon=True).start()
+        elif self.root:
+            try:
+                self.root.after(0, self._draw_status_frame)
+            except:
+                pass
+
+        if duration > 0:
+            def hide_after_delay():
+                time.sleep(duration)
+                with self._lock:
+                    if self.mode == "status" and self.status_text == text:
+                        pass
+                    else:
+                        return
+                self.hide()
+
+            threading.Thread(target=hide_after_delay, daemon=True).start()
 
     def hide(self) -> None:
         """Hide the overlay window and stop the animation loop.

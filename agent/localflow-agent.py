@@ -50,6 +50,7 @@ Example:
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
 # Load .env from project root (parent of agent directory)
@@ -75,6 +76,7 @@ from scipy.io import wavfile
 # System interaction
 import pyperclip
 import pyautogui
+import requests
 
 # Global hotkey
 from pynput import keyboard
@@ -135,15 +137,19 @@ class Config:
     """
 
     websocket_url: str = os.getenv("LOCALFLOW_WS_URL", "http://localhost:3002")
+    api_url: str = os.getenv("LOCALFLOW_API_URL", "http://localhost:3005")
     sample_rate: int = 16000  # Whisper.cpp native rate
     channels: int = 1  # Mono
     dtype: str = "int16"  # 16-bit PCM
     hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+z")
     format_hotkey: str = os.getenv("LOCALFLOW_FORMAT_HOTKEY", "alt+m")
     translate_hotkey: str = os.getenv("LOCALFLOW_TRANSLATE_HOTKEY", "alt+t")  # Toggle translation mode
+    selection_format_hotkey: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_HOTKEY", "ctrl+shift+j")
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )  # developer, concise, professional, raw, outline
+    selection_format_default_target: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_DEFAULT_TARGET", "markdown")
+    selection_formatter_enabled: bool = os.getenv("LOCALFLOW_SELECTION_FORMAT_ENABLED", "true").lower() == "true"
     processing_mode: str = os.getenv("PROCESSING_MODE", "networked-local")  # cloud, networked-local, local
     heartbeat_interval: int = 5
     paste_cooldown: float = 0.1
@@ -580,6 +586,30 @@ class PasteHandler:
         self.last_paste_time = 0
         self.agent = agent  # Reference to agent for keyboard flag
 
+    def copy_selection(self) -> str:
+        """Copy the current selection and return the captured clipboard text."""
+        try:
+            if self.agent:
+                self.agent.pasting_in_progress = True
+
+            if sys.platform == "darwin":
+                pyautogui.hotkey("command", "c")
+            else:
+                pyautogui.hotkey("ctrl", "c")
+
+            time.sleep(0.2)
+            return pyperclip.paste() or ""
+        finally:
+            if self.agent:
+                self.agent.pasting_in_progress = False
+
+    def restore_clipboard(self, text: str) -> None:
+        """Restore clipboard contents after a temporary overwrite."""
+        try:
+            pyperclip.copy(text)
+        except Exception as e:
+            log_warning(f"Failed to restore clipboard: {e}")
+
     def paste_text(self, text: str) -> bool:
         """Copy text to clipboard and simulate paste at cursor position.
 
@@ -745,6 +775,9 @@ class LocalFlowAgent:
         self.hotkey = CONFIG.hotkey
         self.format_hotkey = CONFIG.format_hotkey
         self.translate_hotkey = CONFIG.translate_hotkey
+        self.selection_format_hotkey = self._normalize_selection_hotkey(CONFIG.selection_format_hotkey)
+        self.selection_format_default_target = CONFIG.selection_format_default_target
+        self.selection_formatter_enabled = CONFIG.selection_formatter_enabled
         self.running = True
         self.hotkey_pressed = False
         self.format_mode_active = False  # True when using Alt+M formatting mode
@@ -862,6 +895,18 @@ class LocalFlowAgent:
             if "hotkey" in data:
                 self.hotkey = data["hotkey"]
                 log_info(f"Hotkey updated: {self.hotkey}")
+
+            if "selectionFormatHotkey" in data:
+                self.selection_format_hotkey = self._normalize_selection_hotkey(data["selectionFormatHotkey"])
+                log_info(f"Selection format hotkey updated: {self.selection_format_hotkey}")
+
+            if "selectionFormatDefaultTarget" in data:
+                self.selection_format_default_target = data["selectionFormatDefaultTarget"]
+                log_info(f"Selection format target updated: {self.selection_format_default_target}")
+
+            if "selectionFormatterEnabled" in data:
+                self.selection_formatter_enabled = bool(data["selectionFormatterEnabled"])
+                log_info(f"Selection formatter enabled: {self.selection_formatter_enabled}")
 
     def connect(self) -> bool:
         """Establish WebSocket connection to the LocalFlow server.
@@ -1057,6 +1102,88 @@ class LocalFlowAgent:
         self.format_mode_active = False
         self.translate_mode_active = False
 
+    def _get_refine_endpoint(self) -> str:
+        return f"{CONFIG.api_url.rstrip('/')}/api/dictation/refine"
+
+    def _format_text(self, text: str, format_target: str) -> str:
+        """Send text to the formatting API and return the formatted result."""
+        response = requests.post(
+            self._get_refine_endpoint(),
+            json={
+                "text": text,
+                "operation": "text_format",
+                "formatTarget": format_target,
+                "processingMode": self.processing_mode,
+            },
+            timeout=45,
+        )
+        payload = response.json()
+        if not response.ok or not payload.get("success"):
+            raise RuntimeError(payload.get("details") or payload.get("error") or "Formatting failed")
+        formatted_text = payload.get("refinedText", "")
+        if not formatted_text:
+            raise RuntimeError("Formatter returned empty text")
+        return formatted_text
+
+    def format_selected_text(self, format_target: Optional[str] = None) -> bool:
+        """Format the current text selection and replace it at the cursor."""
+        target = format_target or self.selection_format_default_target
+        if not self.selection_formatter_enabled:
+            log_warning("Selected-text formatter is disabled")
+            self.overlay.show_status("Formatter disabled", bg_color="#7a2e2e")
+            return False
+
+        try:
+            selected_text = self.paste_handler.copy_selection().strip()
+            if not selected_text:
+                log_warning("No selected text found to format")
+                self.overlay.show_status("No selection", bg_color="#7a5a20")
+                return False
+
+            self.overlay.show_status(f"Formatting {target.upper()}...", bg_color="#24486b", duration=0)
+            formatted_text = self._format_text(selected_text, target)
+            self.overlay.hide()
+            pasted = self.paste_handler.paste_text(formatted_text)
+            self.overlay.show_status("Formatted", bg_color="#1f6a3c" if pasted else "#7a2e2e")
+            return pasted
+        except Exception as e:
+            log_error(f"Failed to format selected text: {e}")
+            self.overlay.show_status("Formatting failed", bg_color="#7a2e2e")
+            return False
+
+    def choose_format_target(self) -> Optional[str]:
+        """Open a small chooser window for selected-text formatting."""
+        try:
+            import tkinter as tk
+        except ImportError:
+            log_error("Tkinter is not available for the format chooser")
+            return None
+
+        options = ["markdown", "json", "jsonl", "csv"]
+        result = {"target": None}
+
+        root = tk.Tk()
+        root.title("Whispr Flow Format")
+        root.attributes("-topmost", True)
+        root.resizable(False, False)
+
+        frame = tk.Frame(root, padx=16, pady=16)
+        frame.pack()
+
+        tk.Label(frame, text="Format selected text as:", anchor="w").pack(fill="x", pady=(0, 8))
+
+        for option in options:
+            tk.Button(
+                frame,
+                text=option.upper(),
+                width=20,
+                command=lambda value=option: (result.__setitem__("target", value), root.destroy()),
+            ).pack(fill="x", pady=2)
+
+        tk.Button(frame, text="Cancel", width=20, command=root.destroy).pack(fill="x", pady=(8, 0))
+        root.mainloop()
+        return result["target"]
+
     def _parse_hotkey(self, hotkey_str: str) -> set:
         """Parse a hotkey string into virtual key codes.
 
@@ -1166,6 +1293,16 @@ class LocalFlowAgent:
 
         return None
 
+    def _normalize_selection_hotkey(self, hotkey_str: str) -> str:
+        """Reserve Alt-based combos for recording hotkeys."""
+        normalized = hotkey_str.lower().strip()
+        if normalized.startswith("alt+"):
+            log_warning(
+                f"Selection formatter hotkey '{hotkey_str}' conflicts with Alt recording hotkeys; using ctrl+shift+j instead"
+            )
+            return "ctrl+shift+j"
+        return normalized
+
     def _setup_hotkey_listener(self):
         """Configure global hotkey listeners for recording triggers.
 
@@ -1199,10 +1336,18 @@ class LocalFlowAgent:
         parts = self.hotkey.lower().replace("+", " ").split()
         format_parts = self.format_hotkey.lower().replace("+", " ").split()
         translate_parts = self.translate_hotkey.lower().replace("+", " ").split()
+        self.selection_format_hotkey = self._normalize_selection_hotkey(self.selection_format_hotkey)
+        selection_parts = self.selection_format_hotkey.lower().replace("+", " ").split()
         
         hotkey_char = parts[1] if len(parts) >= 2 else "l"
         format_char = format_parts[1] if len(format_parts) >= 2 else "m"
         translate_char = translate_parts[1] if len(translate_parts) >= 2 else "t"
+        if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
+            selection_char = selection_parts[2]
+        elif len(selection_parts) >= 2:
+            selection_char = selection_parts[1]
+        else:
+            selection_char = "j"
 
         # Register Regular Recording Hotkey
         if parts[0] == "alt":
@@ -1224,6 +1369,19 @@ class LocalFlowAgent:
                 alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
                 combo_str = alt_names[alt_key] + "+" + translate_char
                 hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False, translate_mode=True)
+
+        if self.selection_formatter_enabled and selection_parts:
+            if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
+                for ctrl_name in ["<ctrl_l>", "<ctrl_r>"]:
+                    for shift_name in ["<shift_l>", "<shift_r>"]:
+                        hotkeys[f"{ctrl_name}+{shift_name}+{selection_char}"] = (
+                            lambda target=self.selection_format_default_target: self._on_selection_hotkey(target)
+                        )
+            elif len(selection_parts) >= 2 and selection_parts[0] == "ctrl":
+                for ctrl_name in ["<ctrl_l>", "<ctrl_r>"]:
+                    hotkeys[f"{ctrl_name}+{selection_char}"] = (
+                        lambda target=self.selection_format_default_target: self._on_selection_hotkey(target)
+                    )
 
         log_info(f"Registering recording hotkeys: {list(hotkeys.keys())}")
 
@@ -1250,12 +1408,12 @@ class LocalFlowAgent:
                 is_char = False
                 if hasattr(key, "char") and key.char:
                     k = key.char.lower()
-                    is_char = k in [hotkey_char, format_char, translate_char]
+                    is_char = k in [hotkey_char, format_char, translate_char, selection_char]
                 
                 # Double check VK codes for letters
                 vk = self._get_vk(key)
                 if vk:
-                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char]]
+                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, selection_char]]
                     if vk in vks:
                         is_char = True
 
@@ -1279,6 +1437,14 @@ class LocalFlowAgent:
         if not self.hotkey_pressed:
             self.hotkey_pressed = True
             self._start_recording(format_mode=format_mode, translate_mode=translate_mode)
+
+    def _on_selection_hotkey(self, format_target: str) -> None:
+        """Handle the selected-text formatting hotkey without starting recording."""
+        if self.recorder.is_recording() or self.pasting_in_progress:
+            return
+        log_info(f"Formatting selected text as {format_target}")
+        self.overlay.show_status(f"{format_target.upper()} requested", bg_color="#24486b", duration=0.8)
+        self.format_selected_text(format_target)
 
     def run(self) -> None:
         """Execute the main agent event loop.
@@ -1320,6 +1486,7 @@ class LocalFlowAgent:
         log_info(f"Hotkey (raw): {self.hotkey}")
         log_info(f"Hotkey (format): {self.format_hotkey}")
         log_info(f"Hotkey (translate): {self.translate_hotkey}")
+        log_info(f"Hotkey (selection format): {self.selection_format_hotkey}")
         log_info(f"Mode: {self.mode}")
         log_info(f"Processing: {self.processing_mode}")
         log_info("=" * 60)
@@ -1445,7 +1612,34 @@ def main() -> None:
     """
     check_dependencies()
 
+    parser = argparse.ArgumentParser(description="LocalFlow desktop agent")
+    parser.add_argument(
+        "--format-selection",
+        action="store_true",
+        help="Format the currently selected text instead of running the agent loop",
+    )
+    parser.add_argument(
+        "--choose-format",
+        action="store_true",
+        help="Show a chooser window for the selected-text formatter",
+    )
+    parser.add_argument(
+        "--format-target",
+        choices=["markdown", "json", "jsonl", "csv"],
+        help="Explicit output target for --format-selection",
+    )
+    args = parser.parse_args()
+
     agent = LocalFlowAgent()
+
+    if args.format_selection:
+        target = args.format_target
+        if args.choose_format:
+            target = agent.choose_format_target()
+        if not target:
+            sys.exit(1)
+        sys.exit(0 if agent.format_selected_text(target) else 1)
+
     agent.run()
 
 
