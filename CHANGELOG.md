@@ -7,13 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed - Formatter Hotkeys And Cleanup Dictation Mode
+
+**What Changed**
+- Switched the selected-text formatter default back to `Alt+J`
+- Added a dedicated cleanup dictation hotkey on `Alt+N` for punctuation, spelling, and grammar repair passes
+- Kept `Alt+M` as the outline/formatting dictation hotkey
+
+**Why**
+- `Ctrl+Shift+J` collides with browser developer tools in common workflows
+- Raw dictation and translation can leave behind artifacts such as literal punctuation words like `slash`
+- Cleanup is distinct from both outline formatting and selected-text reformatting, so it now has its own recording-mode hotkey
+
+**Implementation Details**
+- The desktop agent now refreshes `formatHotkey`, `translateHotkey`, and `cleanupHotkey` from live `settings_update` events
+- Selected-text formatter hotkeys are normalized against all reserved recording shortcuts before registration
+- Added a new `cleanup` refinement mode focused on punctuation/control words, spelling repair, and grammar cleanup
+- Fixed the mock listener cleanup path used by startup verification
+
+**Result**
+- `Alt+L` remains raw dictation
+- `Alt+M` remains outline/list formatting dictation
+- `Alt+N` runs a cleanup-focused dictation pass
+- `Alt+J` formats highlighted text without using the microphone
+
+**Files Changed**
+- `agent/localflow-agent.py` - Added cleanup hotkey support, live hotkey refresh handling, conflict-aware selection hotkey normalization, and startup cleanup fix
+- `src/app/api/dictation/refine/route.ts` - Added `cleanup` refinement mode and prompt
+- `src/lib/utils.ts` - Added cleanup hotkey settings and changed the selected-text formatter default back to `alt+j`
+- `src/app/page.tsx` - Added cleanup hotkey controls and cleanup mode to the settings UI
+- `src/hooks/use-websocket.ts` - Extended settings sync types with `cleanupHotkey`
+- `mini-services/websocket-service/index.ts` - Extended settings payload types with `cleanupHotkey`
+- `AGENTS.md` - Updated repo hotkey guidance and regression notes
+
 ### Fixed - Desktop Agent Startup Crash From Formatter Hotkey Parsing
 
 **Issue:** The selected-text formatter hotkey parser misread `Ctrl+Shift+J` and registered `shift` as the terminal key. That caused the desktop agent to crash during startup with `ValueError: shift`, which made `Alt+L` appear broken because the hotkey listener never came up.
 
 **Solution**
 - Corrected `ctrl+shift+<key>` parsing in the desktop agent so the terminal key is read from the third token
-- Preserved `Ctrl+Shift+J` as the selected-text formatter default without interfering with dictation hotkeys
 - Verified the agent now stays running after hotkey registration
 
 **Files Changed**
@@ -27,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **How It Works**
 - Highlight existing text in any app
-- Press `Ctrl+Shift+J` to format the selection without using the microphone
+- Press `Alt+J` to format the selection without using the microphone
 - The agent copies the selection, sends it to the formatting API, and pastes the formatted result back
 - The formatted result stays on the clipboard after completion
 

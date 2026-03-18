@@ -109,7 +109,7 @@ interface ProcessAudioMessage {
   /** Base64-encoded audio data */
   audio: string;
   /** Refinement mode for text processing */
-  mode: "developer" | "concise" | "professional" | "raw" | "outline";
+  mode: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
   /** Where processing should occur */
   processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
@@ -130,6 +130,8 @@ interface SettingsUpdate {
   hotkey?: string;
   /** Hotkey to toggle translation mode */
   translateHotkey?: string;
+  /** Hotkey to trigger cleanup-mode dictation */
+  cleanupHotkey?: string;
   /** Hotkey to format selected text */
   selectionFormatHotkey?: string;
   /** Refinement mode */

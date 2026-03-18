@@ -3,7 +3,7 @@
  *
  * This module provides the API endpoint for text refinement using LLMs,
  * supporting multiple processing modes (cloud, networked-local, local) and
- * refinement styles (developer, concise, professional, raw, outline).
+ * refinement styles (developer, concise, professional, raw, outline, cleanup).
  *
  * Purpose & Reasoning:
  *   This API route serves as the abstraction layer between the frontend and
@@ -14,6 +14,7 @@
  *   - professional: Formal business language with profanity filtering
  *   - raw: Pass-through mode with no changes
  *   - outline: Structured markdown formatting (uses Cerebras API)
+ *   - cleanup: Post-pass repair for punctuation words, spelling, and grammar
  *
  *   The route handles prompt construction, mode selection, error handling,
  *   and unified response formatting across all LLM backends.
@@ -120,8 +121,9 @@ const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
  * - professional: Formal business language
  * - raw: No processing (pass-through)
  * - outline: Markdown structure formatting
+ * - cleanup: Post-pass cleanup for punctuation/spelling artifacts
  */
-type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline";
+type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
 type RefineOperation = "dictation_refine" | "text_format";
 type FormatTarget = "markdown" | "json" | "jsonl" | "csv";
 
@@ -290,6 +292,15 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 6. NEVER add commentary, refuse requests, or modify the meaning
 7. NEVER say things like "Here is the text" or "I can't help with..."
 8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
+
+  cleanup: `You are a dictation cleanup tool. Your ONLY job is to repair leftover transcription artifacts without changing intent. You must:
+1. Fix grammar, punctuation, capitalization, and obvious spelling mistakes
+2. Convert spoken punctuation/control words into symbols when the context clearly calls for punctuation or code, paths, URLs, or markup (for example: "slash", "backslash", "colon", "comma", "period", "open paren", "close paren")
+3. Remove filler words, duplicate fragments, and obvious ASR debris
+4. Preserve the original meaning, tone, names, code terms, and profanity unless the only change is correcting punctuation formatting
+5. Keep words as words when they are semantically intended and not clearly punctuation
+6. NEVER add commentary, refuse requests, or invent content
+7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
 };
 
 // ============================================
@@ -331,7 +342,7 @@ function validateRequest(data: unknown): data is RefineRequest {
     throw new Error("Invalid refine operation");
   }
 
-  if (req.mode && !["developer", "concise", "professional", "raw", "outline"].includes(req.mode as string)) {
+  if (req.mode && !["developer", "concise", "professional", "raw", "outline", "cleanup"].includes(req.mode as string)) {
     throw new Error("Invalid refinement mode");
   }
 

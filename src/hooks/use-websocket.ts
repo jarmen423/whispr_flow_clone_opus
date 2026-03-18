@@ -125,6 +125,8 @@ export interface SettingsUpdate {
   hotkey?: string;
   /** Hotkey to toggle translation mode */
   translateHotkey?: string;
+  /** Hotkey to trigger cleanup-mode dictation */
+  cleanupHotkey?: string;
   /** Hotkey to format selected text */
   selectionFormatHotkey?: string;
   /** Refinement mode */

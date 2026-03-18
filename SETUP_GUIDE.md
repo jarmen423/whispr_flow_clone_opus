@@ -1175,13 +1175,17 @@ python localflow-agent.py
 |--------|----------|
 | `Alt + L` | Raw mode: Hold to record, release to transcribe |
 | `Alt + M` | Format mode: Same, but with LLM formatting for outlines/lists |
+| `Alt + N` | Cleanup mode: Dictation pass for punctuation, spelling, and grammar repair |
 | `Alt + T` | Toggle translation mode (🌐 speak any language → English) |
+| `Alt + J` | Format highlighted text without recording audio |
 
 **Customize in `.env`:**
 ```bash
 LOCALFLOW_HOTKEY=alt+l              # Raw mode hotkey
 LOCALFLOW_FORMAT_HOTKEY=alt+m       # Format mode hotkey
+LOCALFLOW_CLEANUP_HOTKEY=alt+n      # Cleanup mode hotkey
 LOCALFLOW_TRANSLATE_HOTKEY=alt+t    # Translation toggle hotkey
+LOCALFLOW_SELECTION_FORMAT_HOTKEY=alt+j # Selected-text formatter hotkey
 ```
 
 ### URLs

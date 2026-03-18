@@ -259,7 +259,7 @@ export interface DictationItem {
   /** Duration of recording in seconds */
   duration: number;
   /** Refinement mode used (developer, concise, professional, raw) */
-  mode: "developer" | "concise" | "professional" | "raw" | "outline";
+  mode: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
   /** Where processing occurred */
   processingMode: "cloud" | "networked-local" | "local";
 }
@@ -277,10 +277,12 @@ export interface Settings {
   hotkey: string;
   /** Hotkey to toggle translation mode */
   translateHotkey: string;
+  /** Hotkey for cleanup-mode dictation */
+  cleanupHotkey: string;
   /** Global hotkey for formatting selected text */
   selectionFormatHotkey: string;
   /** LLM refinement mode for text processing */
-  refinementMode: "developer" | "concise" | "professional" | "raw" | "outline";
+  refinementMode: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
   /** Default target when formatting selected text */
   selectionFormatDefaultTarget: "markdown" | "json" | "jsonl" | "csv";
   /** Where transcription/processing occurs */
@@ -306,7 +308,8 @@ export interface Settings {
 export const defaultSettings: Settings = {
   hotkey: "alt+l",
   translateHotkey: "alt+t",
-  selectionFormatHotkey: "ctrl+shift+j",
+  cleanupHotkey: "alt+n",
+  selectionFormatHotkey: "alt+j",
   refinementMode: "developer",
   selectionFormatDefaultTarget: "markdown",
   processingMode: "cloud",
@@ -366,10 +369,7 @@ export function loadSettings(): Settings {
       try {
         const parsed = { ...defaultSettings, ...JSON.parse(stored) } as Settings;
 
-        if (
-          parsed.selectionFormatHotkey === "alt+j" ||
-          parsed.selectionFormatHotkey === "alt+k"
-        ) {
+        if (parsed.selectionFormatHotkey === "ctrl+shift+j") {
           parsed.selectionFormatHotkey = defaultSettings.selectionFormatHotkey;
         }
 

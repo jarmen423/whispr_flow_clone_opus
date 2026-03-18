@@ -144,7 +144,8 @@ class Config:
     hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+z")
     format_hotkey: str = os.getenv("LOCALFLOW_FORMAT_HOTKEY", "alt+m")
     translate_hotkey: str = os.getenv("LOCALFLOW_TRANSLATE_HOTKEY", "alt+t")  # Toggle translation mode
-    selection_format_hotkey: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_HOTKEY", "ctrl+shift+j")
+    cleanup_hotkey: str = os.getenv("LOCALFLOW_CLEANUP_HOTKEY", "alt+n")
+    selection_format_hotkey: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_HOTKEY", "alt+j")
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )  # developer, concise, professional, raw, outline
@@ -775,6 +776,7 @@ class LocalFlowAgent:
         self.hotkey = CONFIG.hotkey
         self.format_hotkey = CONFIG.format_hotkey
         self.translate_hotkey = CONFIG.translate_hotkey
+        self.cleanup_hotkey = CONFIG.cleanup_hotkey
         self.selection_format_hotkey = self._normalize_selection_hotkey(CONFIG.selection_format_hotkey)
         self.selection_format_default_target = CONFIG.selection_format_default_target
         self.selection_formatter_enabled = CONFIG.selection_formatter_enabled
@@ -782,6 +784,7 @@ class LocalFlowAgent:
         self.hotkey_pressed = False
         self.format_mode_active = False  # True when using Alt+M formatting mode
         self.translate_mode_active = False  # True when using Alt+T translation mode
+        self.cleanup_mode_active = False  # True when using Alt+N cleanup mode
         self.pasting_in_progress = False  # Flag to prevent keyboard listener interference
 
         # Set up Socket.IO event handlers
@@ -896,6 +899,18 @@ class LocalFlowAgent:
                 self.hotkey = data["hotkey"]
                 log_info(f"Hotkey updated: {self.hotkey}")
 
+            if "formatHotkey" in data:
+                self.format_hotkey = data["formatHotkey"]
+                log_info(f"Format hotkey updated: {self.format_hotkey}")
+
+            if "translateHotkey" in data:
+                self.translate_hotkey = data["translateHotkey"]
+                log_info(f"Translate hotkey updated: {self.translate_hotkey}")
+
+            if "cleanupHotkey" in data:
+                self.cleanup_hotkey = data["cleanupHotkey"]
+                log_info(f"Cleanup hotkey updated: {self.cleanup_hotkey}")
+
             if "selectionFormatHotkey" in data:
                 self.selection_format_hotkey = self._normalize_selection_hotkey(data["selectionFormatHotkey"])
                 log_info(f"Selection format hotkey updated: {self.selection_format_hotkey}")
@@ -1001,7 +1016,7 @@ class LocalFlowAgent:
         except Exception as e:
             log_debug(f"Overlay notification failed: {e}")
 
-    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False) -> None:
+    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, cleanup_mode: bool = False) -> None:
         """Initiate audio recording session.
 
         Starts the AudioRecorder, displays the visual overlay, and
@@ -1017,6 +1032,7 @@ class LocalFlowAgent:
         Args:
             format_mode: If True, uses LLM formatting/outline mode.
             translate_mode: If True, uses translation mode.
+            cleanup_mode: If True, uses cleanup refinement mode.
 
         Returns:
             None
@@ -1028,6 +1044,8 @@ class LocalFlowAgent:
             # Log mode for debugging (overlay already shows visual animation)
             if translate_mode:
                 log_info("🌐 Translation mode recording started")
+            elif cleanup_mode:
+                log_info("🧹 Cleanup mode recording started")
             elif format_mode:
                 log_info("📝 Format mode recording started")
             else:
@@ -1036,11 +1054,14 @@ class LocalFlowAgent:
             # Set mode flags
             self.format_mode_active = format_mode
             self.translate_mode_active = translate_mode
+            self.cleanup_mode_active = cleanup_mode
 
             if format_mode:
                 log_info("Format mode activated (Alt+M)")
             if translate_mode:
                 log_info("Translation mode activated (Alt+T)")
+            if cleanup_mode:
+                log_info(f"Cleanup mode activated ({self.cleanup_hotkey})")
 
             # Notify server
             if self.connected:
@@ -1050,7 +1071,8 @@ class LocalFlowAgent:
                         {
                             "timestamp": int(time.time() * 1000), 
                             "format_mode": format_mode,
-                            "translate_mode": translate_mode
+                            "translate_mode": translate_mode,
+                            "cleanup_mode": cleanup_mode,
                         },
                         namespace="/agent",
                     )
@@ -1071,7 +1093,7 @@ class LocalFlowAgent:
         audio_bytes = self.recorder.stop()
 
         # Determine effective mode
-        effective_mode = "outline" if self.format_mode_active else self.mode
+        effective_mode = "cleanup" if self.cleanup_mode_active else "outline" if self.format_mode_active else self.mode
         
         if audio_bytes:
             # Convert to base64
@@ -1101,6 +1123,7 @@ class LocalFlowAgent:
         # Reset flags
         self.format_mode_active = False
         self.translate_mode_active = False
+        self.cleanup_mode_active = False
 
     def _get_refine_endpoint(self) -> str:
         return f"{CONFIG.api_url.rstrip('/')}/api/dictation/refine"
@@ -1294,13 +1317,34 @@ class LocalFlowAgent:
         return None
 
     def _normalize_selection_hotkey(self, hotkey_str: str) -> str:
-        """Reserve Alt-based combos for recording hotkeys."""
+        """Normalize the selected-text formatter hotkey to a supported combo."""
         normalized = hotkey_str.lower().strip()
-        if normalized.startswith("alt+"):
+        supported = [
+            "alt+j",
+            "ctrl+j",
+            "ctrl+shift+j",
+            "ctrl+shift+k",
+            "ctrl+shift+f",
+        ]
+        reserved = {
+            self.hotkey.lower(),
+            self.format_hotkey.lower(),
+            self.translate_hotkey.lower(),
+            self.cleanup_hotkey.lower(),
+        }
+        fallback = next((candidate for candidate in supported if candidate not in reserved), "ctrl+shift+j")
+        if normalized not in supported:
             log_warning(
-                f"Selection formatter hotkey '{hotkey_str}' conflicts with Alt recording hotkeys; using ctrl+shift+j instead"
+                f"Selection formatter hotkey '{hotkey_str}' is unsupported; using {fallback} instead"
             )
-            return "ctrl+shift+j"
+            return fallback
+
+        if normalized in reserved:
+            log_warning(
+                f"Selection formatter hotkey '{hotkey_str}' conflicts with a recording shortcut; using {fallback} instead"
+            )
+            return fallback
+
         return normalized
 
     def _setup_hotkey_listener(self):
@@ -1336,12 +1380,14 @@ class LocalFlowAgent:
         parts = self.hotkey.lower().replace("+", " ").split()
         format_parts = self.format_hotkey.lower().replace("+", " ").split()
         translate_parts = self.translate_hotkey.lower().replace("+", " ").split()
+        cleanup_parts = self.cleanup_hotkey.lower().replace("+", " ").split()
         self.selection_format_hotkey = self._normalize_selection_hotkey(self.selection_format_hotkey)
         selection_parts = self.selection_format_hotkey.lower().replace("+", " ").split()
         
         hotkey_char = parts[1] if len(parts) >= 2 else "l"
         format_char = format_parts[1] if len(format_parts) >= 2 else "m"
         translate_char = translate_parts[1] if len(translate_parts) >= 2 else "t"
+        cleanup_char = cleanup_parts[1] if len(cleanup_parts) >= 2 else "n"
         if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
             selection_char = selection_parts[2]
         elif len(selection_parts) >= 2:
@@ -1370,8 +1416,20 @@ class LocalFlowAgent:
                 combo_str = alt_names[alt_key] + "+" + translate_char
                 hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False, translate_mode=True)
 
+        if cleanup_parts[0] == "alt":
+            for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
+                alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
+                combo_str = alt_names[alt_key] + "+" + cleanup_char
+                hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False, translate_mode=False, cleanup_mode=True)
+
         if self.selection_formatter_enabled and selection_parts:
-            if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
+            if len(selection_parts) >= 2 and selection_parts[0] == "alt":
+                for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
+                    alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
+                    hotkeys[f"{alt_names[alt_key]}+{selection_char}"] = (
+                        lambda target=self.selection_format_default_target: self._on_selection_hotkey(target)
+                    )
+            elif len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
                 for ctrl_name in ["<ctrl_l>", "<ctrl_r>"]:
                     for shift_name in ["<shift_l>", "<shift_r>"]:
                         hotkeys[f"{ctrl_name}+{shift_name}+{selection_char}"] = (
@@ -1408,12 +1466,12 @@ class LocalFlowAgent:
                 is_char = False
                 if hasattr(key, "char") and key.char:
                     k = key.char.lower()
-                    is_char = k in [hotkey_char, format_char, translate_char, selection_char]
+                    is_char = k in [hotkey_char, format_char, translate_char, cleanup_char, selection_char]
                 
                 # Double check VK codes for letters
                 vk = self._get_vk(key)
                 if vk:
-                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, selection_char]]
+                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, cleanup_char, selection_char]]
                     if vk in vks:
                         is_char = True
 
@@ -1427,16 +1485,16 @@ class LocalFlowAgent:
         self.release_listener.start()
         self.hotkey_listener.start()
 
-        return type("MockListener", (), {"stop": lambda: None})()
+        return type("MockListener", (), {"stop": lambda self: None})()
 
-    def _on_hotkey_press(self, format_mode: bool = False, translate_mode: bool = False) -> None:
+    def _on_hotkey_press(self, format_mode: bool = False, translate_mode: bool = False, cleanup_mode: bool = False) -> None:
         """Handle global hotkey press events.
         
         Initiates recording with the appropriate mode flags.
         """
         if not self.hotkey_pressed:
             self.hotkey_pressed = True
-            self._start_recording(format_mode=format_mode, translate_mode=translate_mode)
+            self._start_recording(format_mode=format_mode, translate_mode=translate_mode, cleanup_mode=cleanup_mode)
 
     def _on_selection_hotkey(self, format_target: str) -> None:
         """Handle the selected-text formatting hotkey without starting recording."""
@@ -1486,6 +1544,7 @@ class LocalFlowAgent:
         log_info(f"Hotkey (raw): {self.hotkey}")
         log_info(f"Hotkey (format): {self.format_hotkey}")
         log_info(f"Hotkey (translate): {self.translate_hotkey}")
+        log_info(f"Hotkey (cleanup): {self.cleanup_hotkey}")
         log_info(f"Hotkey (selection format): {self.selection_format_hotkey}")
         log_info(f"Mode: {self.mode}")
         log_info(f"Processing: {self.processing_mode}")

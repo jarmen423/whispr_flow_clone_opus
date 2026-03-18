@@ -3,7 +3,8 @@
 ## Hotkey Rules
 
 - Keep dictation hotkeys in the `Alt+<letter>` space only.
-- Keep selected-text formatter hotkeys out of the Alt keyspace to avoid collisions with recording and translation shortcuts.
+- Current defaults are `Alt+L` raw dictation, `Alt+M` outline formatting dictation, `Alt+N` cleanup dictation, `Alt+T` translation toggle, and `Alt+J` selected-text formatting.
+- The selected-text formatter may use `Alt+J`, but it must never reuse a letter already assigned to recording or translation shortcuts.
 - For combo parsing, treat `ctrl+shift+j` style shortcuts as three tokens. The terminal key is the third token, not the second.
 
 ## Startup Verification
@@ -15,3 +16,4 @@
 ## Regression Note
 
 - On March 11, 2026, the selected-text formatter feature regressed startup by registering `ctrl+shift+shift` instead of `ctrl+shift+j`, which caused `pynput` to raise `ValueError: shift` and prevented the desktop agent from listening for `Alt+L`.
+- On March 18, 2026, the desktop agent also needed a runtime settings fix so `Alt+M`, `Alt+N`, and `Alt+T` updates actually refreshed the live hotkey listener state.

@@ -332,6 +332,7 @@ export default function LocalFlowPage() {
     sendSettings({
       hotkey: updated.hotkey,
       translateHotkey: updated.translateHotkey,
+      cleanupHotkey: updated.cleanupHotkey,
       selectionFormatHotkey: updated.selectionFormatHotkey,
       mode: updated.refinementMode,
       selectionFormatDefaultTarget: updated.selectionFormatDefaultTarget,
@@ -467,7 +468,7 @@ export default function LocalFlowPage() {
                     <Select
                       value={settings.refinementMode}
                       onValueChange={(
-                        value: "developer" | "concise" | "professional" | "raw" | "outline"
+                        value: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup"
                       ) =>
                         updateSettings({ refinementMode: value })
                       }
@@ -479,6 +480,7 @@ export default function LocalFlowPage() {
                         <SelectItem value="developer">Developer</SelectItem>
                         <SelectItem value="concise">Concise</SelectItem>
                         <SelectItem value="professional">Professional</SelectItem>
+                        <SelectItem value="cleanup">Cleanup</SelectItem>
                         <SelectItem value="outline">Outline</SelectItem>
                         <SelectItem value="raw">Raw (No Refinement)</SelectItem>
                       </SelectContent>
@@ -498,8 +500,7 @@ export default function LocalFlowPage() {
                       <SelectContent>
                         <SelectItem value="alt+l">Alt + L</SelectItem>
                         <SelectItem value="alt+v">Alt + V</SelectItem>
-                        <SelectItem value="ctrl+shift+v">Ctrl + Shift + V</SelectItem>
-                        <SelectItem value="cmd+shift+v">Cmd + Shift + V</SelectItem>
+                        <SelectItem value="alt+d">Alt + D</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
@@ -517,6 +518,7 @@ export default function LocalFlowPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="alt+j">Alt + J</SelectItem>
                         <SelectItem value="ctrl+shift+j">Ctrl + Shift + J</SelectItem>
                         <SelectItem value="ctrl+shift+k">Ctrl + Shift + K</SelectItem>
                         <SelectItem value="ctrl+shift+f">Ctrl + Shift + F</SelectItem>
@@ -524,6 +526,26 @@ export default function LocalFlowPage() {
                     </Select>
                     <p className="text-xs text-muted-foreground">
                       Formats the currently selected text without recording audio
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Cleanup Hotkey</Label>
+                    <Select
+                      value={settings.cleanupHotkey}
+                      onValueChange={(value) => updateSettings({ cleanupHotkey: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="alt+n">Alt + N</SelectItem>
+                        <SelectItem value="alt+k">Alt + K</SelectItem>
+                        <SelectItem value="alt+p">Alt + P</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Records audio and runs a cleanup pass for punctuation, spelling, and grammar repair
                     </p>
                   </div>
 
