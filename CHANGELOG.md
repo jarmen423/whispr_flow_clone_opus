@@ -7,35 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed - Formatter Hotkeys And Cleanup Dictation Mode
+### Added - Voice Agent Mode (Alt+A) with Web Search
+
+**New Feature:** Hold `Alt+A`, speak a question, release — answer is pasted at the cursor. Searches the web automatically when the question requires current information.
+
+**How It Works**
+- `llama-3.3-70b-versatile` (Groq) receives the transcribed question with a `web_search` tool available
+- Model decides autonomously whether to search or answer directly
+- If searching: Brave Search API returns top 5 results → model grounds its answer in them
+- Answer is pasted at the cursor via the normal paste pipeline
+
+**Configuration**
+```bash
+BRAVE_API_KEY=your_key_here
+LOCALFLOW_AGENT_HOTKEY=alt+a          # optional, this is the default
+# AGENT_LLM_MODEL=llama-3.3-70b-versatile  # optional override
+```
+
+**Files Changed**
+- `src/app/api/agent/query/route.ts` - New route: Groq tool-call loop + Brave Search execution
+- `mini-services/websocket-service/index.ts` - Added `"agent"` to mode union, routes to `/api/agent/query` instead of `/api/dictation/refine`
+- `agent/localflow-agent.py` - Added `agent_hotkey` config, `agent_mode_active` flag, `Alt+A` registration, mode routing in `_stop_recording`
+- `.env` - Added `BRAVE_API_KEY`, `LOCALFLOW_AGENT_HOTKEY` documentation
+
+**TODO**: Investigate Cerebras tool calling support (cookbook: https://inference-docs.cerebras.ai/cookbook/agents/build-your-own-perplexity). If Qwen 3 235B supports the full OpenAI tool spec, migrate agent to Cerebras for ~10x faster generation.
+
+---
+
+### Added - Cerebras Backup Key Auto-Rotation
+
+**New Feature:** Three Cerebras API keys with automatic failover on 401/402/429.
+
+**How It Works**
+- `CEREBRAS_API_KEY`, `CEREBRAS_API_KEY_2`, `CEREBRAS_API_KEY_3` are all read at startup
+- On retryable error (quota hit, invalid key, rate limit), the next key is tried immediately
+- Non-retryable errors (400 bad request, 500 server error) fail fast without retrying
+
+**Files Changed**
+- `src/app/api/dictation/refine/route.ts` - Replaced single `CEREBRAS_API_KEY` const with `CEREBRAS_API_KEYS` array; rewrote `refineCerebrasWithPrompt` with retry loop
+- `.env` - Added `CEREBRAS_API_KEY_2`, `CEREBRAS_API_KEY_3`
+
+---
+
+### Fixed - Cerebras Model and Parameter Compatibility
+
+**Issues Fixed**
+- `gpt-oss-120b` is not available on the free tier — changed `CEREBRAS_MODEL` to `qwen-3-235b-a22b-instruct-2507`
+- `reasoning_effort` parameter is only supported by `gpt-oss-120b` — removed from all Cerebras API calls (causes 400 on Qwen)
+
+**Files Changed**
+- `.env` - Updated `CEREBRAS_MODEL`
+- `src/app/api/dictation/refine/route.ts` - Removed `reasoning_effort` from request body
+
+---
+
+### Fixed - Selection Copy Reliability (Clipboard Sentinel)
+
+**Issue:** Alt+J and Alt+N were sending stale clipboard content to the API when focus was wrong or Alt was still held when Ctrl+C fired.
+
+**Root Cause**
+- The GlobalHotKeys callback fires while Alt is still physically held
+- If Ctrl+C fires too quickly, the OS sees Ctrl+Alt+C — which most apps don't treat as copy
+- The old clipboard content was then silently shipped to the API, producing wrong output
+
+**Solution**
+- Write a sentinel value (`__WHISPR_COPY_SENTINEL__`) to clipboard before Ctrl+C
+- After 200ms, read clipboard — if unchanged, the copy failed
+- On failure: restore original clipboard, log warning, return empty string (shows "No selection" overlay)
+
+**Files Changed**
+- `agent/localflow-agent.py` - Rewrote `copy_selection()` with sentinel detection
+
+---
+
+### Added - whispr-flow-debug Command
+
+**New Development Tool:** `whispr-flow-debug` runs all services in the current terminal with color-coded prefixed logs — useful for debugging agent behavior.
+
+**Features**
+- Kills any processes holding ports 3002 and 3005 before starting
+- Runs Next.js, WebSocket service, and Python agent under `concurrently` with color-coded `[nextjs]`, `[websocket]`, `[agent]` prefixes
+- Uses `-u` flag for Python (unbuffered stdout) so agent logs appear in real time
+- Uses `.cmd` wrappers (`next.cmd`, `sucrase-node.cmd`) for Windows compatibility without bun
+
+**Usage**
+```powershell
+whispr-flow-debug   # from anywhere in PowerShell
+```
+
+**Files Changed**
+- `whispr-flow-debug.ps1` - New script
+- PowerShell profile - Added `whispr-flow-debug` function
+
+---
+
+### Changed - Formatter Hotkeys And Selected-Text Cleanup
 
 **What Changed**
 - Switched the selected-text formatter default back to `Alt+J`
-- Added a dedicated cleanup dictation hotkey on `Alt+N` for punctuation, spelling, and grammar repair passes
+- Added a dedicated selected-text cleanup hotkey on `Alt+N` for punctuation, spelling, and grammar repair passes
 - Kept `Alt+M` as the outline/formatting dictation hotkey
 
 **Why**
 - `Ctrl+Shift+J` collides with browser developer tools in common workflows
 - Raw dictation and translation can leave behind artifacts such as literal punctuation words like `slash`
-- Cleanup is distinct from both outline formatting and selected-text reformatting, so it now has its own recording-mode hotkey
+- Cleanup is distinct from both outline dictation and selected-text markdown formatting, so it now has its own selected-text hotkey
 
 **Implementation Details**
 - The desktop agent now refreshes `formatHotkey`, `translateHotkey`, and `cleanupHotkey` from live `settings_update` events
 - Selected-text formatter hotkeys are normalized against all reserved recording shortcuts before registration
-- Added a new `cleanup` refinement mode focused on punctuation/control words, spelling repair, and grammar cleanup
+- Added a cleanup pass for selected text focused on punctuation/control words, spelling repair, and grammar cleanup
 - Fixed the mock listener cleanup path used by startup verification
 
 **Result**
 - `Alt+L` remains raw dictation
 - `Alt+M` remains outline/list formatting dictation
-- `Alt+N` runs a cleanup-focused dictation pass
 - `Alt+J` formats highlighted text without using the microphone
+- `Alt+N` cleans up highlighted text without using the microphone
 
 **Files Changed**
-- `agent/localflow-agent.py` - Added cleanup hotkey support, live hotkey refresh handling, conflict-aware selection hotkey normalization, and startup cleanup fix
-- `src/app/api/dictation/refine/route.ts` - Added `cleanup` refinement mode and prompt
+- `agent/localflow-agent.py` - Added selected-text cleanup hotkey support, live hotkey refresh handling, conflict-aware selection hotkey normalization, and startup cleanup fix
+- `src/app/api/dictation/refine/route.ts` - Added selected-text cleanup target and prompt
 - `src/lib/utils.ts` - Added cleanup hotkey settings and changed the selected-text formatter default back to `alt+j`
-- `src/app/page.tsx` - Added cleanup hotkey controls and cleanup mode to the settings UI
+- `src/app/page.tsx` - Added cleanup hotkey controls and selected-text cleanup UI copy
 - `src/hooks/use-websocket.ts` - Extended settings sync types with `cleanupHotkey`
 - `mini-services/websocket-service/index.ts` - Extended settings payload types with `cleanupHotkey`
 - `AGENTS.md` - Updated repo hotkey guidance and regression notes

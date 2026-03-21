@@ -525,7 +525,7 @@ export default function LocalFlowPage() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      Formats the currently selected text without recording audio
+                      Formats the currently selected text as markdown or structured output without recording audio
                     </p>
                   </div>
 
@@ -545,7 +545,7 @@ export default function LocalFlowPage() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      Records audio and runs a cleanup pass for punctuation, spelling, and grammar repair
+                      Runs a cleanup pass on highlighted text for punctuation, spelling, and grammar repair
                     </p>
                   </div>
 
@@ -553,7 +553,7 @@ export default function LocalFlowPage() {
                     <Label>Selection Format Default</Label>
                     <Select
                       value={settings.selectionFormatDefaultTarget}
-                      onValueChange={(value: "markdown" | "json" | "jsonl" | "csv") =>
+                      onValueChange={(value: "markdown" | "json" | "jsonl" | "csv" | "cleanup") =>
                         updateSettings({ selectionFormatDefaultTarget: value })
                       }
                     >
@@ -562,6 +562,7 @@ export default function LocalFlowPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="markdown">Markdown</SelectItem>
+                        <SelectItem value="cleanup">Cleanup</SelectItem>
                         <SelectItem value="json">JSON</SelectItem>
                         <SelectItem value="jsonl">JSONL</SelectItem>
                         <SelectItem value="csv">CSV</SelectItem>

@@ -76,10 +76,14 @@ const GROQ_LLM_API_BASE_URL =
 const ZAI_LLM_MODEL = process.env.GROQ_LLM_MODEL || process.env.ZAI_LLM_MODEL || "llama-3.3-70b-versatile";
 
 /**
- * Cerebras API key for outline formatting mode.
- * Provides access to GPT-OSS-120B model.
+ * Cerebras API keys — primary + up to two backups.
+ * On 401/402/429, the caller automatically retries with the next key.
  */
-const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || "";
+const CEREBRAS_API_KEYS = [
+  process.env.CEREBRAS_API_KEY,
+  process.env.CEREBRAS_API_KEY_2,
+  process.env.CEREBRAS_API_KEY_3,
+].filter(Boolean) as string[];
 
 /**
  * Cerebras API endpoint URL.
@@ -125,7 +129,7 @@ const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
  */
 type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
 type RefineOperation = "dictation_refine" | "text_format";
-type FormatTarget = "markdown" | "json" | "jsonl" | "csv";
+type FormatTarget = "markdown" | "json" | "jsonl" | "csv" | "cleanup";
 
 /**
  * Request body for refinement endpoint.
@@ -204,15 +208,16 @@ RULES:
 6. Use proper markdown syntax (- for bullets, 1. 2. 3. for numbers)`;
 
 const FORMAT_PROMPTS: Record<FormatTarget, string> = {
-  markdown: `You are a text formatting assistant. Rewrite the input as clean, readable Markdown.
+  markdown: `You are a Markdown formatter. Your ONLY job is to reformat the provided text as clean, readable Markdown. You are NOT an assistant, advisor, or chatbot.
 
-RULES:
-1. Output only the final Markdown
-2. Never add commentary or code fences unless the content itself requires them
-3. Preserve meaning exactly while improving structure
-4. Use headings, bullet lists, numbered lists, tables, and code fences only when they fit the content naturally
-5. Preserve profanity, code references, names, and technical terms exactly
-6. Do not invent facts or expand the content`,
+CRITICAL RULES — violations are failures:
+1. Output ONLY the reformatted text. Every word in your output must come from the input.
+2. NEVER answer questions in the text. If the input asks a question, format the question — do not answer it.
+3. NEVER add content that was not in the input: no examples, no explanations, no recommendations, no elaboration.
+4. NEVER add preamble, commentary, or closing remarks.
+5. Preserve every word and sentence from the input exactly — only change whitespace, punctuation around structure, and markdown syntax.
+6. Add headings, bullet points, bold, or other markdown ONLY where the existing text structure clearly calls for it.
+7. Do not invent, infer, or expand anything.`,
 
   json: `You are a structured data formatter. Convert the input into valid pretty-printed JSON.
 
@@ -241,6 +246,19 @@ RULES:
 4. Quote fields only when needed by CSV rules
 5. Preserve the source meaning exactly
 6. If the input cannot be converted into a trustworthy table without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  cleanup: `You are a post-dictation cleanup tool. The input is raw speech-to-text output. Clean it up. You must:
+
+1. Output ONLY the cleaned text — no commentary, no preamble
+2. ALWAYS remove filler words: um, uh, like (when used as filler), you know, basically, so um, and uh, right, I mean — delete them entirely
+3. ALWAYS remove duplicate words and stutters (e.g. "the the", "and and")
+4. Fix capitalization and punctuation throughout
+5. Convert spoken symbols to their actual characters: "slash" → /, "dot" → ., "colon" → :, "underscore" → _, "at" → @, "percent" → %, "dollar sign" → $, "open paren" → (, "close paren" → ), "open curly brace" → {, "close curly brace" → }, "less than" → <, "greater than" → >, "quote" → "
+6. Reconstruct URLs, file paths, email addresses, and code identifiers from their spelled-out components
+7. Merge spaced digit sequences into numbers: "4 0 4" → 404, "2 0 2 5" → 2025
+8. Use backticks for inline code, identifiers, and paths when the context makes it clear — use your judgment
+9. Preserve all meaning, technical terms, names, and profanity — only remove noise and fix symbols
+10. Do NOT reword or rephrase — only remove noise and convert symbols`,
 };
 
 /**
@@ -346,7 +364,7 @@ function validateRequest(data: unknown): data is RefineRequest {
     throw new Error("Invalid refinement mode");
   }
 
-  if (req.formatTarget && !["markdown", "json", "jsonl", "csv"].includes(req.formatTarget as string)) {
+  if (req.formatTarget && !["markdown", "json", "jsonl", "csv", "cleanup"].includes(req.formatTarget as string)) {
     throw new Error("Invalid format target");
   }
 
@@ -630,74 +648,91 @@ async function refineCerebras(text: string): Promise<string> {
 }
 
 async function refineCerebrasWithPrompt(text: string, prompt: string, modeLabel: string): Promise<string> {
-  if (!CEREBRAS_API_KEY) {
+  if (CEREBRAS_API_KEYS.length === 0) {
     throw new Error(
       `CEREBRAS_API_KEY is required for ${modeLabel}. Get your API key from: https://cloud.cerebras.ai/`
     );
   }
 
-  console.log(`[Refine] Calling Cerebras with model ${CEREBRAS_MODEL}`);
+  // Statuses that indicate the key itself is the problem — retry with next key
+  const retryableStatuses = new Set([401, 402, 429]);
+  let lastError: Error = new Error("All Cerebras API keys failed");
 
-  try {
-    const response = await fetch(CEREBRAS_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${CEREBRAS_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CEREBRAS_MODEL,
-        messages: [
-          { role: "system", content: prompt },
-          { role: "user", content: text },
-        ],
-        temperature: 0.3,
-        max_completion_tokens: 2000,
-        reasoning_effort: "low", // Cerebras-specific parameter for speed
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
+  for (let i = 0; i < CEREBRAS_API_KEYS.length; i++) {
+    const key = CEREBRAS_API_KEYS[i];
+    const keyLabel = i === 0 ? "primary" : `backup ${i}`;
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
+    console.log(`[Refine] Calling Cerebras (${keyLabel}) with model ${CEREBRAS_MODEL}`);
 
-      if (response.status === 401) {
-        throw new Error("Invalid CEREBRAS_API_KEY. Check your API key at https://cloud.cerebras.ai/");
+    try {
+      const response = await fetch(CEREBRAS_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CEREBRAS_MODEL,
+          messages: [
+            { role: "system", content: prompt },
+            { role: "user", content: text },
+          ],
+          temperature: 0.3,
+          max_completion_tokens: 2000,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+
+        if (retryableStatuses.has(response.status)) {
+          lastError = new Error(`Cerebras ${keyLabel} rejected (${response.status})`);
+          console.warn(`[Refine] ${lastError.message} — trying next key...`);
+          continue;
+        }
+
+        throw new Error(`Cerebras API error (${response.status}): ${errorText}`);
       }
-      if (response.status === 429) {
-        throw new Error("Cerebras rate limit exceeded. Free tier: 1M tokens/day, 30 RPM");
+
+      const result = await response.json();
+      const refinedText = result.choices?.[0]?.message?.content;
+
+      if (!refinedText) {
+        throw new Error("Empty response from Cerebras");
       }
 
-      throw new Error(`Cerebras API error (${response.status}): ${errorText}`);
+      if (i > 0) console.log(`[Refine] Cerebras succeeded with backup key ${i}`);
+      console.log(`[Refine] Cerebras response received (${refinedText.length} chars)`);
+      return refinedText.trim();
+
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("timeout")) {
+          throw new Error("Cerebras API request timed out (30s limit)");
+        }
+        if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+          throw new Error("Failed to connect to Cerebras API. Check your internet connection.");
+        }
+        throw error;
+      }
+      throw new Error("Unknown error during Cerebras refinement");
     }
-
-    const result = await response.json();
-
-    const refinedText = result.choices?.[0]?.message?.content;
-
-    if (!refinedText) {
-      throw new Error("Empty response from Cerebras");
-    }
-
-    console.log(`[Refine] Cerebras response received (${refinedText.length} chars)`);
-
-    return refinedText.trim();
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === "AbortError" || error.message.includes("timeout")) {
-        throw new Error("Cerebras API request timed out (30s limit)");
-      }
-      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error("Failed to connect to Cerebras API. Check your internet connection.");
-      }
-      throw error;
-    }
-    throw new Error("Unknown error during Cerebras refinement");
   }
+
+  throw lastError;
 }
 
 async function formatText(text: string, formatTarget: FormatTarget): Promise<string> {
-  const formatted = await refineCerebrasWithPrompt(text, FORMAT_PROMPTS[formatTarget], `${formatTarget} formatting`);
+  // Cleanup gets the raw text directly — its prompt already frames the task correctly,
+  // and wrapping with "DO NOT REMOVE CONTENT" markers would conflict with filler-word removal.
+  // Other format targets get explicit markers to prevent the model treating the text as a
+  // question or request to respond to.
+  const userMessage =
+    formatTarget === "cleanup"
+      ? text
+      : `[FORMAT THIS TEXT — DO NOT ANSWER OR ADD CONTENT]\n\n${text}\n\n[END OF TEXT TO FORMAT]`;
+  const formatted = await refineCerebrasWithPrompt(userMessage, FORMAT_PROMPTS[formatTarget], `${formatTarget} formatting`);
 
   if (formatted.trim() === "__FORMAT_ERROR__") {
     throw new Error(`Unable to convert input into ${formatTarget.toUpperCase()} without guessing`);

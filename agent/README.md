@@ -24,11 +24,11 @@ python localflow-agent.py
 |--------|------|-------------|
 | `Alt+L` | Raw | Fast transcription without post-processing |
 | `Alt+M` | Format | Transcription with Cerebras LLM formatting (lists, outlines, indentation) |
-| `Alt+N` | Cleanup | Dictation with punctuation, spelling, and grammar cleanup |
 | `Alt+T` | Toggle | Toggle translation mode (🌐 speak any language → English) |
 | `Alt+J` | Selection Format | Format highlighted text without recording audio |
+| `Alt+N` | Selection Cleanup | Clean highlighted text for punctuation, spelling, and grammar |
 
-1. Press and hold your chosen recording hotkey (`Alt+L`, `Alt+M`, or `Alt+N`)
+1. Press and hold your chosen recording hotkey (`Alt+L` or `Alt+M`)
 2. Speak clearly (include voice commands like "bullet", "new line" in format mode)
 3. Release the keys
 4. Text is automatically pasted at your cursor
@@ -48,7 +48,7 @@ Set these environment variables:
 | `LOCALFLOW_WS_URL`         | `http://localhost:3002`     | WebSocket server URL                                                       |
 | `LOCALFLOW_HOTKEY`         | `alt+l`                    | Global hotkey for raw mode                                                 |
 | `LOCALFLOW_FORMAT_HOTKEY`  | `alt+m`                    | Hotkey for format mode (uses Cerebras LLM for outlines/lists)              |
-| `LOCALFLOW_CLEANUP_HOTKEY` | `alt+n`                    | Hotkey for cleanup mode (fix punctuation words, spelling, grammar)         |
+| `LOCALFLOW_CLEANUP_HOTKEY` | `alt+n`                    | Hotkey to clean highlighted text (fix punctuation words, spelling, grammar) |
 | `LOCALFLOW_TRANSLATE_HOTKEY` | `alt+t`                  | Hotkey to toggle translation mode                                          |
 | `LOCALFLOW_SELECTION_FORMAT_HOTKEY` | `alt+j`          | Hotkey to format highlighted text without recording                        |
 | `LOCALFLOW_TRANSLATE`      | `false`                    | Default translation mode (true/false)                                      |
@@ -86,8 +86,8 @@ Call John
 - `alt+m` - Alt + M (default for format mode)
 - Custom: Set `LOCALFLOW_FORMAT_HOTKEY` env var
 
-**Cleanup Mode Hotkeys:**
-- `alt+n` - Alt + N (default for cleanup mode)
+**Selection Cleanup Hotkeys:**
+- `alt+n` - Alt + N (default for highlighted-text cleanup)
 - `alt+k` / `alt+p` - Supported alternates from the UI
 
 **Selection Formatter Hotkeys:**

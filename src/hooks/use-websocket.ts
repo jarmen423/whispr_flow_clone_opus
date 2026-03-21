@@ -132,7 +132,7 @@ export interface SettingsUpdate {
   /** Refinement mode */
   mode?: string;
   /** Default target for selected-text formatting */
-  selectionFormatDefaultTarget?: "markdown" | "json" | "jsonl" | "csv";
+  selectionFormatDefaultTarget?: "markdown" | "json" | "jsonl" | "csv" | "cleanup";
   /** Where processing should occur */
   processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate to English */

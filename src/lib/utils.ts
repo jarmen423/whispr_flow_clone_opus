@@ -277,14 +277,14 @@ export interface Settings {
   hotkey: string;
   /** Hotkey to toggle translation mode */
   translateHotkey: string;
-  /** Hotkey for cleanup-mode dictation */
+  /** Hotkey for cleanup pass on highlighted text */
   cleanupHotkey: string;
   /** Global hotkey for formatting selected text */
   selectionFormatHotkey: string;
   /** LLM refinement mode for text processing */
   refinementMode: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
   /** Default target when formatting selected text */
-  selectionFormatDefaultTarget: "markdown" | "json" | "jsonl" | "csv";
+  selectionFormatDefaultTarget: "markdown" | "json" | "jsonl" | "csv" | "cleanup";
   /** Where transcription/processing occurs */
   processingMode: "cloud" | "networked-local" | "local";
   /** Whether to automatically copy results to clipboard */

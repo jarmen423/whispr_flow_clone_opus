@@ -60,11 +60,11 @@ localflow -stop    # Windows
 **Press and hold:**
 - `Alt+L` — Raw transcription (fastest, no post-processing)
 - `Alt+M` — Format mode (Cerebras LLM for outlines/lists)
-- `Alt+N` — Cleanup mode (punctuation, spelling, and grammar repair)
 - `Alt+T` — Toggle translation mode (🌐 speak any language → English)
 
 **Selection formatter:**
 - `Alt+J` — Reformat highlighted text without recording audio
+- `Alt+N` — Clean up highlighted text after a raw dictation pass
 
 Release to transcribe and auto-paste.
 
@@ -135,8 +135,8 @@ Uses **Cerebras GPT-OSS-120B** for intelligent formatting:
 - GPT-OSS-120B for better instruction following
 - Generous free tier: 1M tokens/day
 
-### Cleanup Mode (Alt+N)
-- Repairs punctuation, capitalization, spelling, and grammar after dictation
+### Selected-Text Cleanup (Alt+N)
+- Repairs punctuation, capitalization, spelling, and grammar on highlighted text
 - Useful after raw mode or translation mode when literal punctuation words leak through
 - Converts obvious spoken punctuation tokens like `slash`, `comma`, or `colon` into symbols when context clearly calls for them
 - Preserves wording and intent while removing obvious ASR debris
@@ -155,7 +155,7 @@ CEREBRAS_MODEL=gpt-oss-120b
 # Hotkeys
 LOCALFLOW_HOTKEY=alt+l          # Raw mode
 LOCALFLOW_FORMAT_HOTKEY=alt+m   # Format mode
-LOCALFLOW_CLEANUP_HOTKEY=alt+n  # Cleanup mode
+LOCALFLOW_CLEANUP_HOTKEY=alt+n  # Clean highlighted text
 LOCALFLOW_TRANSLATE_HOTKEY=alt+t # Toggle translation
 LOCALFLOW_SELECTION_FORMAT_HOTKEY=alt+j # Format highlighted text
 

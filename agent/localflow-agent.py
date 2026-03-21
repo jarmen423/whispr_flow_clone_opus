@@ -146,6 +146,7 @@ class Config:
     translate_hotkey: str = os.getenv("LOCALFLOW_TRANSLATE_HOTKEY", "alt+t")  # Toggle translation mode
     cleanup_hotkey: str = os.getenv("LOCALFLOW_CLEANUP_HOTKEY", "alt+n")
     selection_format_hotkey: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_HOTKEY", "alt+j")
+    agent_hotkey: str = os.getenv("LOCALFLOW_AGENT_HOTKEY", "alt+a")
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )  # developer, concise, professional, raw, outline
@@ -593,13 +594,35 @@ class PasteHandler:
             if self.agent:
                 self.agent.pasting_in_progress = True
 
+            # Wait for modifier keys (Alt, etc.) to settle before sending Ctrl+C.
+            # Without this delay, Ctrl+C fires as Ctrl+Alt+C when called from
+            # a GlobalHotKeys callback (Alt key is still physically held).
+            time.sleep(0.25)
+
+            # Use a sentinel to detect whether Ctrl+C actually copied anything.
+            # If the clipboard equals the sentinel after Ctrl+C, the copy failed
+            # (wrong focus, Alt still held, no selection, etc.) and we bail out
+            # instead of sending stale clipboard content to the API.
+            sentinel = "__WHISPR_COPY_SENTINEL__"
+            original_clip = pyperclip.paste()
+            pyperclip.copy(sentinel)
+
             if sys.platform == "darwin":
                 pyautogui.hotkey("command", "c")
             else:
                 pyautogui.hotkey("ctrl", "c")
 
             time.sleep(0.2)
-            return pyperclip.paste() or ""
+            captured = pyperclip.paste() or ""
+
+            if captured == sentinel:
+                # Copy failed — restore original clipboard and return empty
+                pyperclip.copy(original_clip)
+                log_warning("Selection copy failed (clipboard unchanged) — focus was wrong or nothing selected")
+                return ""
+
+            log_info(f"Clipboard captured ({len(captured)} chars): {captured[:80]!r}")
+            return captured
         finally:
             if self.agent:
                 self.agent.pasting_in_progress = False
@@ -780,11 +803,12 @@ class LocalFlowAgent:
         self.selection_format_hotkey = self._normalize_selection_hotkey(CONFIG.selection_format_hotkey)
         self.selection_format_default_target = CONFIG.selection_format_default_target
         self.selection_formatter_enabled = CONFIG.selection_formatter_enabled
+        self.agent_hotkey = CONFIG.agent_hotkey
         self.running = True
         self.hotkey_pressed = False
         self.format_mode_active = False  # True when using Alt+M formatting mode
         self.translate_mode_active = False  # True when using Alt+T translation mode
-        self.cleanup_mode_active = False  # True when using Alt+N cleanup mode
+        self.agent_mode_active = False  # True when using Alt+A voice agent mode
         self.pasting_in_progress = False  # Flag to prevent keyboard listener interference
 
         # Set up Socket.IO event handlers
@@ -1016,7 +1040,7 @@ class LocalFlowAgent:
         except Exception as e:
             log_debug(f"Overlay notification failed: {e}")
 
-    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, cleanup_mode: bool = False) -> None:
+    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False) -> None:
         """Initiate audio recording session.
 
         Starts the AudioRecorder, displays the visual overlay, and
@@ -1032,7 +1056,6 @@ class LocalFlowAgent:
         Args:
             format_mode: If True, uses LLM formatting/outline mode.
             translate_mode: If True, uses translation mode.
-            cleanup_mode: If True, uses cleanup refinement mode.
 
         Returns:
             None
@@ -1042,10 +1065,10 @@ class LocalFlowAgent:
             self.overlay.show()
 
             # Log mode for debugging (overlay already shows visual animation)
-            if translate_mode:
+            if agent_mode:
+                log_info("🤖 Agent mode recording started")
+            elif translate_mode:
                 log_info("🌐 Translation mode recording started")
-            elif cleanup_mode:
-                log_info("🧹 Cleanup mode recording started")
             elif format_mode:
                 log_info("📝 Format mode recording started")
             else:
@@ -1054,14 +1077,12 @@ class LocalFlowAgent:
             # Set mode flags
             self.format_mode_active = format_mode
             self.translate_mode_active = translate_mode
-            self.cleanup_mode_active = cleanup_mode
+            self.agent_mode_active = agent_mode
 
             if format_mode:
                 log_info("Format mode activated (Alt+M)")
             if translate_mode:
                 log_info("Translation mode activated (Alt+T)")
-            if cleanup_mode:
-                log_info(f"Cleanup mode activated ({self.cleanup_hotkey})")
 
             # Notify server
             if self.connected:
@@ -1072,7 +1093,6 @@ class LocalFlowAgent:
                             "timestamp": int(time.time() * 1000), 
                             "format_mode": format_mode,
                             "translate_mode": translate_mode,
-                            "cleanup_mode": cleanup_mode,
                         },
                         namespace="/agent",
                     )
@@ -1093,7 +1113,12 @@ class LocalFlowAgent:
         audio_bytes = self.recorder.stop()
 
         # Determine effective mode
-        effective_mode = "cleanup" if self.cleanup_mode_active else "outline" if self.format_mode_active else self.mode
+        if self.agent_mode_active:
+            effective_mode = "agent"
+        elif self.format_mode_active:
+            effective_mode = "outline"
+        else:
+            effective_mode = self.mode
         
         if audio_bytes:
             # Convert to base64
@@ -1123,7 +1148,7 @@ class LocalFlowAgent:
         # Reset flags
         self.format_mode_active = False
         self.translate_mode_active = False
-        self.cleanup_mode_active = False
+        self.agent_mode_active = False
 
     def _get_refine_endpoint(self) -> str:
         return f"{CONFIG.api_url.rstrip('/')}/api/dictation/refine"
@@ -1151,6 +1176,8 @@ class LocalFlowAgent:
     def format_selected_text(self, format_target: Optional[str] = None) -> bool:
         """Format the current text selection and replace it at the cursor."""
         target = format_target or self.selection_format_default_target
+        action_label = "Cleaning up selection" if target == "cleanup" else f"Formatting {target.upper()}..."
+        success_label = "Cleaned up" if target == "cleanup" else "Formatted"
         if not self.selection_formatter_enabled:
             log_warning("Selected-text formatter is disabled")
             self.overlay.show_status("Formatter disabled", bg_color="#7a2e2e")
@@ -1163,11 +1190,11 @@ class LocalFlowAgent:
                 self.overlay.show_status("No selection", bg_color="#7a5a20")
                 return False
 
-            self.overlay.show_status(f"Formatting {target.upper()}...", bg_color="#24486b", duration=0)
+            self.overlay.show_status(action_label, bg_color="#24486b", duration=0)
             formatted_text = self._format_text(selected_text, target)
             self.overlay.hide()
             pasted = self.paste_handler.paste_text(formatted_text)
-            self.overlay.show_status("Formatted", bg_color="#1f6a3c" if pasted else "#7a2e2e")
+            self.overlay.show_status(success_label, bg_color="#1f6a3c" if pasted else "#7a2e2e")
             return pasted
         except Exception as e:
             log_error(f"Failed to format selected text: {e}")
@@ -1182,7 +1209,7 @@ class LocalFlowAgent:
             log_error("Tkinter is not available for the format chooser")
             return None
 
-        options = ["markdown", "json", "jsonl", "csv"]
+        options = ["markdown", "cleanup", "json", "jsonl", "csv"]
         result = {"target": None}
 
         root = tk.Tk()
@@ -1384,10 +1411,12 @@ class LocalFlowAgent:
         self.selection_format_hotkey = self._normalize_selection_hotkey(self.selection_format_hotkey)
         selection_parts = self.selection_format_hotkey.lower().replace("+", " ").split()
         
+        agent_parts = self.agent_hotkey.lower().replace("+", " ").split()
         hotkey_char = parts[1] if len(parts) >= 2 else "l"
         format_char = format_parts[1] if len(format_parts) >= 2 else "m"
         translate_char = translate_parts[1] if len(translate_parts) >= 2 else "t"
         cleanup_char = cleanup_parts[1] if len(cleanup_parts) >= 2 else "n"
+        agent_char = agent_parts[1] if len(agent_parts) >= 2 else "a"
         if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
             selection_char = selection_parts[2]
         elif len(selection_parts) >= 2:
@@ -1416,11 +1445,19 @@ class LocalFlowAgent:
                 combo_str = alt_names[alt_key] + "+" + translate_char
                 hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False, translate_mode=True)
 
-        if cleanup_parts[0] == "alt":
+        # Register Agent Hotkey (Alt+A)
+        if len(agent_parts) >= 2 and agent_parts[0] == "alt":
             for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
                 alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
-                combo_str = alt_names[alt_key] + "+" + cleanup_char
-                hotkeys[combo_str] = lambda: self._on_hotkey_press(format_mode=False, translate_mode=False, cleanup_mode=True)
+                combo_str = alt_names[alt_key] + "+" + agent_char
+                hotkeys[combo_str] = lambda: self._on_hotkey_press(agent_mode=True)
+
+        if len(cleanup_parts) >= 2 and cleanup_parts[0] == "alt":
+            for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
+                alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
+                hotkeys[f"{alt_names[alt_key]}+{cleanup_char}"] = (
+                    lambda target="cleanup": self._on_selection_hotkey(target)
+                )
 
         if self.selection_formatter_enabled and selection_parts:
             if len(selection_parts) >= 2 and selection_parts[0] == "alt":
@@ -1466,12 +1503,12 @@ class LocalFlowAgent:
                 is_char = False
                 if hasattr(key, "char") and key.char:
                     k = key.char.lower()
-                    is_char = k in [hotkey_char, format_char, translate_char, cleanup_char, selection_char]
-                
+                    is_char = k in [hotkey_char, format_char, translate_char, cleanup_char, selection_char, agent_char]
+
                 # Double check VK codes for letters
                 vk = self._get_vk(key)
                 if vk:
-                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, cleanup_char, selection_char]]
+                    vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, cleanup_char, selection_char, agent_char]]
                     if vk in vks:
                         is_char = True
 
@@ -1487,14 +1524,14 @@ class LocalFlowAgent:
 
         return type("MockListener", (), {"stop": lambda self: None})()
 
-    def _on_hotkey_press(self, format_mode: bool = False, translate_mode: bool = False, cleanup_mode: bool = False) -> None:
+    def _on_hotkey_press(self, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False) -> None:
         """Handle global hotkey press events.
-        
+
         Initiates recording with the appropriate mode flags.
         """
         if not self.hotkey_pressed:
             self.hotkey_pressed = True
-            self._start_recording(format_mode=format_mode, translate_mode=translate_mode, cleanup_mode=cleanup_mode)
+            self._start_recording(format_mode=format_mode, translate_mode=translate_mode, agent_mode=agent_mode)
 
     def _on_selection_hotkey(self, format_target: str) -> None:
         """Handle the selected-text formatting hotkey without starting recording."""
@@ -1502,7 +1539,10 @@ class LocalFlowAgent:
             return
         log_info(f"Formatting selected text as {format_target}")
         self.overlay.show_status(f"{format_target.upper()} requested", bg_color="#24486b", duration=0.8)
-        self.format_selected_text(format_target)
+        # Run in a background thread so we don't block the GlobalHotKeys callback
+        # thread (which would prevent it from processing further key events).
+        import threading
+        threading.Thread(target=self.format_selected_text, args=(format_target,), daemon=True).start()
 
     def run(self) -> None:
         """Execute the main agent event loop.
