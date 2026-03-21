@@ -77,6 +77,8 @@ python localflow-agent.py
 Default hotkeys:
 - **`Alt+L`** - Raw mode (hold to record, release to transcribe)
 - **`Alt+M`** - Format mode (same, but uses Cerebras LLM for outline/list formatting)
+- **`Alt+J`** - Format highlighted text without recording audio
+- **`Alt+N`** - Clean highlighted text for punctuation, spelling, and grammar repair
 
 **Note:** As of v1.2.0, the default hotkey changed from `Alt+V` to `Alt+L`. Letter keys work more reliably with pynput's `GlobalHotKeys` class. All Alt variants are supported: left Alt, right Alt, AltGr.
 
@@ -212,6 +214,7 @@ The system supports five text refinement modes:
 - **`professional`**: Transforms casual language into business-appropriate text
 - **`raw`**: Returns transcription unchanged (no LLM call)
 - **`outline`**: Format text with lists, indentation, and structure using voice commands
+- **`cleanup`**: Repair punctuation words, spelling, capitalization, and leftover raw-mode artifacts
 
 System prompts are defined in `src/app/api/dictation/refine/route.ts`.
 
@@ -331,7 +334,9 @@ Set via environment variables:
 LOCALFLOW_WS_URL=http://localhost:3002    # WebSocket server URL
 LOCALFLOW_HOTKEY=alt+l                    # Global hotkey for raw mode (use letter keys)
 LOCALFLOW_FORMAT_HOTKEY=alt+m             # Hotkey for format/outline mode
+LOCALFLOW_CLEANUP_HOTKEY=alt+n            # Hotkey for selected-text cleanup
 LOCALFLOW_TRANSLATE_HOTKEY=alt+t          # Hotkey to toggle translation mode
+LOCALFLOW_SELECTION_FORMAT_HOTKEY=alt+j   # Hotkey for selected-text formatting
 LOCALFLOW_TRANSLATE=false                 # Default translation mode (true/false)
 LOCALFLOW_MODE=developer                  # Refinement mode
 LOCALFLOW_PROCESSING=networked-local      # Processing mode

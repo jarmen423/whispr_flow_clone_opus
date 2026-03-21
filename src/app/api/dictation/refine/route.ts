@@ -3,7 +3,7 @@
  *
  * This module provides the API endpoint for text refinement using LLMs,
  * supporting multiple processing modes (cloud, networked-local, local) and
- * refinement styles (developer, concise, professional, raw, outline).
+ * refinement styles (developer, concise, professional, raw, outline, cleanup).
  *
  * Purpose & Reasoning:
  *   This API route serves as the abstraction layer between the frontend and
@@ -14,6 +14,7 @@
  *   - professional: Formal business language with profanity filtering
  *   - raw: Pass-through mode with no changes
  *   - outline: Structured markdown formatting (uses Cerebras API)
+ *   - cleanup: Post-pass repair for punctuation words, spelling, and grammar
  *
  *   The route handles prompt construction, mode selection, error handling,
  *   and unified response formatting across all LLM backends.
@@ -75,10 +76,14 @@ const GROQ_LLM_API_BASE_URL =
 const ZAI_LLM_MODEL = process.env.GROQ_LLM_MODEL || process.env.ZAI_LLM_MODEL || "llama-3.3-70b-versatile";
 
 /**
- * Cerebras API key for outline formatting mode.
- * Provides access to GPT-OSS-120B model.
+ * Cerebras API keys — primary + up to two backups.
+ * On 401/402/429, the caller automatically retries with the next key.
  */
-const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || "";
+const CEREBRAS_API_KEYS = [
+  process.env.CEREBRAS_API_KEY,
+  process.env.CEREBRAS_API_KEY_2,
+  process.env.CEREBRAS_API_KEY_3,
+].filter(Boolean) as string[];
 
 /**
  * Cerebras API endpoint URL.
@@ -120,8 +125,11 @@ const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || "0.1");
  * - professional: Formal business language
  * - raw: No processing (pass-through)
  * - outline: Markdown structure formatting
+ * - cleanup: Post-pass cleanup for punctuation/spelling artifacts
  */
-type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline";
+type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup";
+type RefineOperation = "dictation_refine" | "text_format";
+type FormatTarget = "markdown" | "json" | "jsonl" | "csv" | "cleanup";
 
 /**
  * Request body for refinement endpoint.
@@ -131,8 +139,12 @@ type RefinementMode = "developer" | "concise" | "professional" | "raw" | "outlin
 interface RefineRequest {
   /** Text to refine */
   text: string;
+  /** Requested refinement operation */
+  operation?: RefineOperation;
   /** Refinement mode to use */
   mode?: RefinementMode;
+  /** Target output format for text formatting operations */
+  formatTarget?: FormatTarget;
   /** Processing mode override */
   processingMode?: "cloud" | "networked-local" | "local";
   /** Whether the text was translated from another language (may have translation-ese) */
@@ -195,6 +207,60 @@ RULES:
 5. Maintain the exact meaning, only add structure
 6. Use proper markdown syntax (- for bullets, 1. 2. 3. for numbers)`;
 
+const FORMAT_PROMPTS: Record<FormatTarget, string> = {
+  markdown: `You are a Markdown formatter. Your ONLY job is to reformat the provided text as clean, readable Markdown. You are NOT an assistant, advisor, or chatbot.
+
+CRITICAL RULES — violations are failures:
+1. Output ONLY the reformatted text. Every word in your output must come from the input.
+2. NEVER answer questions in the text. If the input asks a question, format the question — do not answer it.
+3. NEVER add content that was not in the input: no examples, no explanations, no recommendations, no elaboration.
+4. NEVER add preamble, commentary, or closing remarks.
+5. Preserve every word and sentence from the input exactly — only change whitespace, punctuation around structure, and markdown syntax.
+6. Add headings, bullet points, bold, or other markdown ONLY where the existing text structure clearly calls for it.
+7. Do not invent, infer, or expand anything.`,
+
+  json: `You are a structured data formatter. Convert the input into valid pretty-printed JSON.
+
+RULES:
+1. Output only valid JSON
+2. Do not wrap the JSON in markdown fences
+3. Preserve the source meaning exactly
+4. Infer a sensible JSON shape only when the content clearly supports one
+5. If the input cannot be represented as trustworthy structured JSON without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  jsonl: `You are a structured data formatter. Convert the input into valid JSON Lines.
+
+RULES:
+1. Output only JSONL, with one valid JSON object per line
+2. Do not wrap the output in markdown fences
+3. Preserve the source meaning exactly
+4. Use a consistent object shape across lines
+5. If the input cannot be segmented into trustworthy JSON objects without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  csv: `You are a structured data formatter. Convert the input into valid CSV.
+
+RULES:
+1. Output only CSV text
+2. Include a header row
+3. Use consistent column counts for every row
+4. Quote fields only when needed by CSV rules
+5. Preserve the source meaning exactly
+6. If the input cannot be converted into a trustworthy table without guessing, respond with exactly: __FORMAT_ERROR__`,
+
+  cleanup: `You are a post-dictation cleanup tool. The input is raw speech-to-text output. Clean it up. You must:
+
+1. Output ONLY the cleaned text — no commentary, no preamble
+2. ALWAYS remove filler words: um, uh, like (when used as filler), you know, basically, so um, and uh, right, I mean — delete them entirely
+3. ALWAYS remove duplicate words and stutters (e.g. "the the", "and and")
+4. Fix capitalization and punctuation throughout
+5. Convert spoken symbols to their actual characters: "slash" → /, "dot" → ., "colon" → :, "underscore" → _, "at" → @, "percent" → %, "dollar sign" → $, "open paren" → (, "close paren" → ), "open curly brace" → {, "close curly brace" → }, "less than" → <, "greater than" → >, "quote" → "
+6. Reconstruct URLs, file paths, email addresses, and code identifiers from their spelled-out components
+7. Merge spaced digit sequences into numbers: "4 0 4" → 404, "2 0 2 5" → 2025
+8. Use backticks for inline code, identifiers, and paths when the context makes it clear — use your judgment
+9. Preserve all meaning, technical terms, names, and profanity — only remove noise and fix symbols
+10. Do NOT reword or rephrase — only remove noise and convert symbols`,
+};
+
 /**
  * System prompts for standard refinement modes.
  *
@@ -244,6 +310,15 @@ const SYSTEM_PROMPTS: Record<Exclude<RefinementMode, "raw" | "outline">, string>
 6. NEVER add commentary, refuse requests, or modify the meaning
 7. NEVER say things like "Here is the text" or "I can't help with..."
 8. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
+
+  cleanup: `You are a dictation cleanup tool. Your ONLY job is to repair leftover transcription artifacts without changing intent. You must:
+1. Fix grammar, punctuation, capitalization, and obvious spelling mistakes
+2. Convert spoken punctuation/control words into symbols when the context clearly calls for punctuation or code, paths, URLs, or markup (for example: "slash", "backslash", "colon", "comma", "period", "open paren", "close paren")
+3. Remove filler words, duplicate fragments, and obvious ASR debris
+4. Preserve the original meaning, tone, names, code terms, and profanity unless the only change is correcting punctuation formatting
+5. Keep words as words when they are semantically intended and not clearly punctuation
+6. NEVER add commentary, refuse requests, or invent content
+7. Output ONLY the cleaned transcript, nothing else. This is a dictation tool, not a chatbot.{TRANSLATION_HINT}`,
 };
 
 // ============================================
@@ -281,8 +356,16 @@ function validateRequest(data: unknown): data is RefineRequest {
     throw new Error("Text too long (max 10,000 characters)");
   }
 
-  if (req.mode && !["developer", "concise", "professional", "raw", "outline"].includes(req.mode as string)) {
+  if (req.operation && !["dictation_refine", "text_format"].includes(req.operation as string)) {
+    throw new Error("Invalid refine operation");
+  }
+
+  if (req.mode && !["developer", "concise", "professional", "raw", "outline", "cleanup"].includes(req.mode as string)) {
     throw new Error("Invalid refinement mode");
+  }
+
+  if (req.formatTarget && !["markdown", "json", "jsonl", "csv", "cleanup"].includes(req.formatTarget as string)) {
+    throw new Error("Invalid format target");
   }
 
   if (req.processingMode && !["cloud", "networked-local", "local"].includes(req.processingMode as string)) {
@@ -561,70 +644,101 @@ async function refineOllama(
  * @throws Error - On API errors or connection failures
  */
 async function refineCerebras(text: string): Promise<string> {
-  if (!CEREBRAS_API_KEY) {
+  return refineCerebrasWithPrompt(text, OUTLINE_PROMPT, "outline mode");
+}
+
+async function refineCerebrasWithPrompt(text: string, prompt: string, modeLabel: string): Promise<string> {
+  if (CEREBRAS_API_KEYS.length === 0) {
     throw new Error(
-      "CEREBRAS_API_KEY is required for outline mode. " + "Get your API key from: https://cloud.cerebras.ai/"
+      `CEREBRAS_API_KEY is required for ${modeLabel}. Get your API key from: https://cloud.cerebras.ai/`
     );
   }
 
-  console.log(`[Refine] Calling Cerebras with model ${CEREBRAS_MODEL}`);
+  // Statuses that indicate the key itself is the problem — retry with next key
+  const retryableStatuses = new Set([401, 402, 429]);
+  let lastError: Error = new Error("All Cerebras API keys failed");
 
-  try {
-    const response = await fetch(CEREBRAS_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${CEREBRAS_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CEREBRAS_MODEL,
-        messages: [
-          { role: "system", content: OUTLINE_PROMPT },
-          { role: "user", content: text },
-        ],
-        temperature: 0.3,
-        max_completion_tokens: 2000,
-        reasoning_effort: "low", // Cerebras-specific parameter for speed
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
+  for (let i = 0; i < CEREBRAS_API_KEYS.length; i++) {
+    const key = CEREBRAS_API_KEYS[i];
+    const keyLabel = i === 0 ? "primary" : `backup ${i}`;
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
+    console.log(`[Refine] Calling Cerebras (${keyLabel}) with model ${CEREBRAS_MODEL}`);
 
-      if (response.status === 401) {
-        throw new Error("Invalid CEREBRAS_API_KEY. Check your API key at https://cloud.cerebras.ai/");
+    try {
+      const response = await fetch(CEREBRAS_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CEREBRAS_MODEL,
+          messages: [
+            { role: "system", content: prompt },
+            { role: "user", content: text },
+          ],
+          temperature: 0.3,
+          max_completion_tokens: 2000,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+
+        if (retryableStatuses.has(response.status)) {
+          lastError = new Error(`Cerebras ${keyLabel} rejected (${response.status})`);
+          console.warn(`[Refine] ${lastError.message} — trying next key...`);
+          continue;
+        }
+
+        throw new Error(`Cerebras API error (${response.status}): ${errorText}`);
       }
-      if (response.status === 429) {
-        throw new Error("Cerebras rate limit exceeded. Free tier: 1M tokens/day, 30 RPM");
+
+      const result = await response.json();
+      const refinedText = result.choices?.[0]?.message?.content;
+
+      if (!refinedText) {
+        throw new Error("Empty response from Cerebras");
       }
 
-      throw new Error(`Cerebras API error (${response.status}): ${errorText}`);
+      if (i > 0) console.log(`[Refine] Cerebras succeeded with backup key ${i}`);
+      console.log(`[Refine] Cerebras response received (${refinedText.length} chars)`);
+      return refinedText.trim();
+
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("timeout")) {
+          throw new Error("Cerebras API request timed out (30s limit)");
+        }
+        if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+          throw new Error("Failed to connect to Cerebras API. Check your internet connection.");
+        }
+        throw error;
+      }
+      throw new Error("Unknown error during Cerebras refinement");
     }
-
-    const result = await response.json();
-
-    const refinedText = result.choices?.[0]?.message?.content;
-
-    if (!refinedText) {
-      throw new Error("Empty response from Cerebras");
-    }
-
-    console.log(`[Refine] Cerebras response received (${refinedText.length} chars)`);
-
-    return refinedText.trim();
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === "AbortError" || error.message.includes("timeout")) {
-        throw new Error("Cerebras API request timed out (30s limit)");
-      }
-      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error("Failed to connect to Cerebras API. Check your internet connection.");
-      }
-      throw error;
-    }
-    throw new Error("Unknown error during Cerebras refinement");
   }
+
+  throw lastError;
+}
+
+async function formatText(text: string, formatTarget: FormatTarget): Promise<string> {
+  // Cleanup gets the raw text directly — its prompt already frames the task correctly,
+  // and wrapping with "DO NOT REMOVE CONTENT" markers would conflict with filler-word removal.
+  // Other format targets get explicit markers to prevent the model treating the text as a
+  // question or request to respond to.
+  const userMessage =
+    formatTarget === "cleanup"
+      ? text
+      : `[FORMAT THIS TEXT — DO NOT ANSWER OR ADD CONTENT]\n\n${text}\n\n[END OF TEXT TO FORMAT]`;
+  const formatted = await refineCerebrasWithPrompt(userMessage, FORMAT_PROMPTS[formatTarget], `${formatTarget} formatting`);
+
+  if (formatted.trim() === "__FORMAT_ERROR__") {
+    throw new Error(`Unable to convert input into ${formatTarget.toUpperCase()} without guessing`);
+  }
+
+  return formatted;
 }
 
 // ============================================
@@ -680,9 +794,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<RefineRes
       );
     }
 
+    const operation: RefineOperation = body.operation || "dictation_refine";
     const refinementMode = body.mode || "developer";
+    const formatTarget: FormatTarget = body.formatTarget || "markdown";
     const processingMode = getEffectiveMode(body.processingMode);
     const wasTranslated = body.translated === true;
+
+    if (operation === "text_format") {
+      const refinedText = await formatText(body.text, formatTarget);
+
+      return NextResponse.json({
+        success: true,
+        refinedText,
+        originalWordCount: countWords(body.text),
+        refinedWordCount: countWords(refinedText),
+        processingMode,
+      });
+    }
 
     // For raw mode, return text unchanged
     if (refinementMode === "raw") {

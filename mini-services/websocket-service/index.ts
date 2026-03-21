@@ -109,9 +109,9 @@ interface ProcessAudioMessage {
   /** Base64-encoded audio data */
   audio: string;
   /** Refinement mode for text processing */
-  mode: "developer" | "concise" | "professional" | "raw" | "outline";
+  mode: "developer" | "concise" | "professional" | "raw" | "outline" | "cleanup" | "agent";
   /** Where processing should occur */
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
   translate?: boolean;
   /** Client timestamp */
@@ -130,12 +130,20 @@ interface SettingsUpdate {
   hotkey?: string;
   /** Hotkey to toggle translation mode */
   translateHotkey?: string;
+  /** Hotkey to trigger selected-text cleanup */
+  cleanupHotkey?: string;
+  /** Hotkey to format selected text */
+  selectionFormatHotkey?: string;
   /** Refinement mode */
   mode?: string;
+  /** Default target for selected-text formatting */
+  selectionFormatDefaultTarget?: "markdown" | "json" | "jsonl" | "csv" | "cleanup";
   /** Processing location preference */
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
   translate?: boolean;
+  /** Whether selected-text formatting is enabled */
+  selectionFormatterEnabled?: boolean;
 }
 
 // ============================================
@@ -305,10 +313,25 @@ async function processAudio(socket: Socket, message: ProcessAudioMessage): Promi
       throw new Error(transcribeData.error || "Transcription failed");
     }
 
-    // Step 2: Refine (skip for raw mode)
+    // Step 2: Refine / Agent query (skip for raw mode)
     let refinedText = transcribeData.text;
 
-    if (message.mode !== "raw") {
+    if (message.mode === "agent") {
+      // Voice agent mode: answer the question (with optional web search)
+      const agentResponse = await fetch(`${API_BASE_URL}/api/agent/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: transcribeData.text }),
+      });
+
+      const agentData = await agentResponse.json();
+
+      if (!agentResponse.ok || !agentData.success) {
+        throw new Error(agentData.error || "Agent query failed");
+      }
+
+      refinedText = agentData.answer;
+    } else if (message.mode !== "raw") {
       const refineResponse = await fetch(`${API_BASE_URL}/api/dictation/refine`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

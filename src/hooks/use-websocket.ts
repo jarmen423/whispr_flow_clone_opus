@@ -125,12 +125,20 @@ export interface SettingsUpdate {
   hotkey?: string;
   /** Hotkey to toggle translation mode */
   translateHotkey?: string;
+  /** Hotkey to trigger cleanup-mode dictation */
+  cleanupHotkey?: string;
+  /** Hotkey to format selected text */
+  selectionFormatHotkey?: string;
   /** Refinement mode */
   mode?: string;
+  /** Default target for selected-text formatting */
+  selectionFormatDefaultTarget?: "markdown" | "json" | "jsonl" | "csv" | "cleanup";
   /** Where processing should occur */
-  processingMode?: "cloud" | "local";
+  processingMode?: "cloud" | "networked-local" | "local";
   /** Whether to translate to English */
   translate?: boolean;
+  /** Whether selected-text formatting is enabled */
+  selectionFormatterEnabled?: boolean;
 }
 
 /** WebSocket service URL from environment or default */

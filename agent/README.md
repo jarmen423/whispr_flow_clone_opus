@@ -18,21 +18,26 @@ python localflow-agent.py
 
 ### 3. Use
 
-**Three hotkey modes are available:**
+**Five hotkey workflows are available:**
 
 | Hotkey | Mode | Description |
 |--------|------|-------------|
 | `Alt+L` | Raw | Fast transcription without post-processing |
 | `Alt+M` | Format | Transcription with Cerebras LLM formatting (lists, outlines, indentation) |
 | `Alt+T` | Toggle | Toggle translation mode (🌐 speak any language → English) |
+| `Alt+J` | Selection Format | Format highlighted text without recording audio |
+| `Alt+N` | Selection Cleanup | Clean highlighted text for punctuation, spelling, and grammar |
 
-1. Press and hold your chosen hotkey (Alt+L or Alt+M)
+1. Press and hold your chosen recording hotkey (`Alt+L` or `Alt+M`)
 2. Speak clearly (include voice commands like "bullet", "new line" in format mode)
 3. Release the keys
 4. Text is automatically pasted at your cursor
 
 **Translation Mode:**
 Press `Alt+T` to toggle translation on/off. When enabled, speak in any language and get English output.
+
+**Selection Formatter:**
+Highlight text and press `Alt+J` to reformat the current selection without using the microphone.
 
 ## Configuration
 
@@ -43,9 +48,11 @@ Set these environment variables:
 | `LOCALFLOW_WS_URL`         | `http://localhost:3002`     | WebSocket server URL                                                       |
 | `LOCALFLOW_HOTKEY`         | `alt+l`                    | Global hotkey for raw mode                                                 |
 | `LOCALFLOW_FORMAT_HOTKEY`  | `alt+m`                    | Hotkey for format mode (uses Cerebras LLM for outlines/lists)              |
+| `LOCALFLOW_CLEANUP_HOTKEY` | `alt+n`                    | Hotkey to clean highlighted text (fix punctuation words, spelling, grammar) |
 | `LOCALFLOW_TRANSLATE_HOTKEY` | `alt+t`                  | Hotkey to toggle translation mode                                          |
+| `LOCALFLOW_SELECTION_FORMAT_HOTKEY` | `alt+j`          | Hotkey to format highlighted text without recording                        |
 | `LOCALFLOW_TRANSLATE`      | `false`                    | Default translation mode (true/false)                                      |
-| `LOCALFLOW_MODE`           | `developer`                | Refinement mode (developer, concise, professional, raw, outline)           |
+| `LOCALFLOW_MODE`           | `developer`                | Refinement mode (developer, concise, professional, raw, outline, cleanup)  |
 | `LOCALFLOW_PROCESSING`     | `cloud`                    | Processing mode (cloud, networked-local, local)                            |
 | `DEBUG`                    | -                          | Set to any value for debug logging                                         |
 | `CEREBRAS_API_KEY`         | -                          | Required for format mode (get from https://cloud.cerebras.ai/)             |
@@ -79,6 +86,14 @@ Call John
 - `alt+m` - Alt + M (default for format mode)
 - Custom: Set `LOCALFLOW_FORMAT_HOTKEY` env var
 
+**Selection Cleanup Hotkeys:**
+- `alt+n` - Alt + N (default for highlighted-text cleanup)
+- `alt+k` / `alt+p` - Supported alternates from the UI
+
+**Selection Formatter Hotkeys:**
+- `alt+j` - Alt + J (default for highlighted-text formatting)
+- `ctrl+shift+j`, `ctrl+shift+k`, `ctrl+shift+f` - Supported alternatives
+
 **Other Options:**
 - `ctrl+shift+v` - Ctrl + Shift + V
 - `cmd+shift+v` - Cmd + Shift + V (macOS)
@@ -97,8 +112,8 @@ Call John
 
 **"Format mode not activating"**
 - Check agent logs for: `[INFO] Registering hotkeys:`
-- Should show both `alt+l` and `alt+m` hotkeys
-- Try pressing Alt+M firmly - both keys must be detected together
+- Should show `alt+l`, `alt+m`, `alt+n`, and `alt+j` registrations as configured
+- Try pressing the desired Alt hotkey firmly - both keys must be detected together
 
 ### "No audio device found"
 
