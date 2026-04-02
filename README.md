@@ -61,6 +61,7 @@ localflow -stop    # Windows
 - `Alt+L` — Raw transcription (fastest, no post-processing)
 - `Alt+M` — Format mode (Cerebras LLM for outlines/lists)
 - `Alt+T` — Toggle translation mode (🌐 speak any language → English)
+- `Alt+A` — Voice agent (asks a question, web‑search grounded answer)
 
 **Selection formatter:**
 - `Alt+J` — Reformat highlighted text without recording audio
