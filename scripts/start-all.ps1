@@ -16,7 +16,7 @@
        npm, SSH for networked-local mode) are installed and available.
     
     3. **Service Orchestration**: Launches services in separate Windows Terminal tabs:
-       - Node.js Development Servers (Always): Next.js dev server (port 3005)
+       - Node.js Development Servers (Always): Next.js dev server (port 3000)
          and WebSocket service, started via "npm run dev:all"
        - Python LocalFlow Agent (Always): Desktop agent for hotkey detection,
          activated from .venv-whispr virtual environment
@@ -71,7 +71,7 @@
     - Processing Mode: Read from .env file (PROCESSING_MODE variable)
     - Remote SSH host: josh@100.111.169.60 (see $RemoteHost variable)
     - LLM Server Port: 8888
-    - Next.js Dev Port: 3005
+    - Next.js Dev Port: 3000
     - WebSocket Port: Configured in mini-services/websocket-service
 
     IMPORTANT:
@@ -335,7 +335,7 @@ Write-Host ""
 # --- Service 1: Node.js Dev Servers (Next.js + WebSocket) ---
 Write-ColoredOutput "[2/$TotalSteps] Starting Node.js development servers..." -Color Yellow
 Write-ColoredOutput "      Running: npm run dev:all" -Color Gray
-Write-ColoredOutput "      Next.js: http://localhost:3005" -Color Gray
+Write-ColoredOutput "      Next.js: http://localhost:3000" -Color Gray
 
 <#
     Construct and launch Node.js services command.
@@ -431,7 +431,7 @@ if ($NeedsRemoteLLM) {
 }
 Write-Host ""
 Write-ColoredOutput "To stop all services, close the Windows Terminal tabs." -Color Yellow
-Write-ColoredOutput "Access the web UI at: http://localhost:3005" -Color Green
+Write-ColoredOutput "Access the web UI at: http://localhost:3000" -Color Green
 Write-Host ""
 
 <#

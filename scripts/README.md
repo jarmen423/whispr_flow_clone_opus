@@ -110,4 +110,4 @@ Check logs:
 - Windows: Check the PowerShell windows that opened
 
 ### Port conflicts
-Make sure ports 3005 (Next.js) and 3006 (WebSocket) are available.
+Make sure ports 3000 (Next.js) and 3002 (WebSocket) are available.

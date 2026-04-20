@@ -68,3 +68,4 @@ temp/
 /tmp/localflow/
 agent/localflow-agent.py.bak
 .gitignore
+.vercel

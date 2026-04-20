@@ -55,14 +55,14 @@ Write-Host ""
 Write-Host "===================================" -ForegroundColor Cyan
 Write-Host "   LocalFlow  DEBUG MODE" -ForegroundColor Cyan
 Write-Host "===================================" -ForegroundColor Cyan
-Write-Host "  [nextjs]    Next.js on :3005" -ForegroundColor Cyan
+Write-Host "  [nextjs]    Next.js on :3000" -ForegroundColor Cyan
 Write-Host "  [websocket] WS service on :3002" -ForegroundColor Green
 Write-Host "  [agent]     Python desktop agent" -ForegroundColor Yellow
 Write-Host ""
 
 # Kill anything holding our ports (node, bun, or otherwise)
-Write-Host "Clearing ports 3002 and 3005..." -ForegroundColor Gray
-foreach ($port in @(3002, 3005)) {
+Write-Host "Clearing ports 3000 and 3002..." -ForegroundColor Gray
+foreach ($port in @(3000, 3002)) {
     $lines = cmd /c "netstat -ano" 2>$null | Select-String ":$port\s" | Select-String "LISTENING"
     foreach ($line in $lines) {
         $procId = ($line.ToString().Trim() -split '\s+')[-1]
@@ -83,6 +83,6 @@ Set-Location $ProjectRoot
     "--names"         "nextjs,websocket,agent" `
     "--prefix-colors" "cyan.bold,green.bold,yellow.bold" `
     "--kill-others" `
-    "$Next dev -p 3005" `
+    "$Next dev -p 3000" `
     "$SucraseNode `"$WsService`"" `
     "`"$VenvPython`" -u `"$Agent`""

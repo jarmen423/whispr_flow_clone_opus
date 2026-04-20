@@ -137,7 +137,7 @@ class Config:
     """
 
     websocket_url: str = os.getenv("LOCALFLOW_WS_URL", "http://localhost:3002")
-    api_url: str = os.getenv("LOCALFLOW_API_URL", "http://localhost:3005")
+    api_url: str = os.getenv("LOCALFLOW_API_URL", "http://localhost:3000")
     sample_rate: int = 16000  # Whisper.cpp native rate
     channels: int = 1  # Mono
     dtype: str = "int16"  # 16-bit PCM

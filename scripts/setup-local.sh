@@ -354,7 +354,7 @@ OLLAMA_TEMPERATURE=0.1
 WS_PORT=3002
 
 # Next.js
-PORT=3005
+PORT=3000
 EOF
 
     echo -e "${GREEN}.env file created${NC}"

@@ -65,7 +65,7 @@ const PORT = parseInt(process.env.WS_PORT || "3002", 10);
  * Allowed CORS origins.
  * Comma-separated list in ALLOWED_ORIGINS env var.
  */
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3005,http://localhost:3002").split(",");
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://localhost:3005,http://localhost:3002").split(",");
 
 /**
  * Stale connection timeout in milliseconds.
@@ -78,7 +78,7 @@ const STALE_TIMEOUT = parseInt(process.env.WS_STALE_TIMEOUT || "30000", 10);
  * Base URL for the Next.js API.
  * Used to forward audio for transcription/refinement.
  */
-const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3005";
+const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
 // ============================================
 // Types
