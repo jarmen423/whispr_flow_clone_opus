@@ -23,7 +23,6 @@ import {
   FileText,
   Menu,
   X,
-  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -227,7 +226,7 @@ function Hero() {
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <Link href="/signup?redirect=/">
+            <Link href="/download">
               <Button size="lg" variant="outline" className="gap-2 text-base px-8 h-12">
                 <Download className="h-4 w-4" />
                 Download for Desktop
@@ -578,23 +577,17 @@ function DownloadSection({ user }: { user: { name: string | null; email: string 
               { label: "macOS", note: "10.15+", platform: "macos" },
               { label: "Linux", note: "X11 / Wayland", platform: "linux" },
             ].map((platform) => (
-              <a
+              <Link
                 key={platform.label}
-                href={user ? `/api/download?platform=${platform.platform}` : "/signup?redirect=/"}
+                href="/download"
                 className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card/50 hover:bg-card transition-colors"
               >
-                {user ? (
-                  <Download className="h-5 w-5 text-primary shrink-0" />
-                ) : (
-                  <Lock className="h-5 w-5 text-muted-foreground shrink-0" />
-                )}
+                <Download className="h-5 w-5 text-primary shrink-0" />
                 <div className="flex-1">
                   <div className="text-sm font-medium">{platform.label}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {user ? platform.note : "Create a free account to download"}
-                  </div>
+                  <div className="text-xs text-muted-foreground">{platform.note}</div>
                 </div>
-              </a>
+              </Link>
             ))}
           </motion.div>
         </motion.div>
