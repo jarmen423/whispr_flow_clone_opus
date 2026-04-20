@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { dbGetAll, dbGetOne } from "@/lib/db";
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY || "localflow-admin-dev-key";
 
@@ -12,20 +12,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const db = getDb();
+    const totalUsersRow = await dbGetOne("SELECT COUNT(*) as count FROM users") as { count: number } | null;
+    const totalDownloadsRow = await dbGetOne("SELECT COUNT(*) as count FROM download_events") as { count: number } | null;
+    const downloadsByPlatform = await dbGetAll("SELECT platform, COUNT(*) as count FROM download_events GROUP BY platform") as { platform: string; count: number }[];
+    const usersWithDownloadsRow = await dbGetOne("SELECT COUNT(DISTINCT user_id) as count FROM download_events WHERE user_id IS NOT NULL") as { count: number } | null;
 
-    const totalUsers = (db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number }).count;
-    const totalDownloads = (db.prepare("SELECT COUNT(*) as count FROM download_events").get() as { count: number }).count;
-    const downloadsByPlatform = db
-      .prepare("SELECT platform, COUNT(*) as count FROM download_events GROUP BY platform")
-      .all() as { platform: string; count: number }[];
-
-    // Users who downloaded
-    const usersWithDownloads = (
-      db.prepare("SELECT COUNT(DISTINCT user_id) as count FROM download_events WHERE user_id IS NOT NULL").get() as {
-        count: number;
-      }
-    ).count;
+    const totalUsers = totalUsersRow?.count ?? 0;
+    const totalDownloads = totalDownloadsRow?.count ?? 0;
+    const usersWithDownloads = usersWithDownloadsRow?.count ?? 0;
 
     return NextResponse.json({
       success: true,

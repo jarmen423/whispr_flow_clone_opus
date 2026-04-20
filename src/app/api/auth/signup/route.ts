@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { getDb } from "@/lib/db";
+import { dbGetOne, dbInsert } from "@/lib/db";
 import { signJwt } from "@/lib/jwt";
 
 export async function POST(request: NextRequest) {
@@ -16,20 +16,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Password must be at least 6 characters" }, { status: 400 });
     }
 
-    const db = getDb();
-
     // Check if user already exists
-    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase().trim());
+    const existing = await dbGetOne("SELECT id FROM users WHERE email = ?", [email.toLowerCase().trim()]);
     if (existing) {
       return NextResponse.json({ success: false, error: "An account with this email already exists" }, { status: 409 });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = db
-      .prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
-      .run(email.toLowerCase().trim(), name?.trim() || null, passwordHash);
+    const userId = await dbInsert("users", {
+      email: email.toLowerCase().trim(),
+      name: name?.trim() || null,
+      password_hash: passwordHash,
+    });
 
-    const userId = Number(result.lastInsertRowid);
     const token = await signJwt({ userId, email: email.toLowerCase().trim() });
 
     const response = NextResponse.json({
@@ -41,7 +40,7 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: 60 * 60 * 24 * 30,
       path: "/",
     });
 

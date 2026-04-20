@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { getDb } from "@/lib/db";
+import { dbGetOne } from "@/lib/db";
 import { signJwt } from "@/lib/jwt";
 
 export async function POST(request: NextRequest) {
@@ -12,10 +12,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Email and password are required" }, { status: 400 });
     }
 
-    const db = getDb();
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase().trim()) as
+    const user = await dbGetOne("SELECT * FROM users WHERE email = ?", [email.toLowerCase().trim()]) as
       | { id: number; email: string; name: string | null; password_hash: string }
-      | undefined;
+      | null;
 
     if (!user) {
       return NextResponse.json({ success: false, error: "No account found with this email" }, { status: 401 });

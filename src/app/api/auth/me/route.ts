@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { dbGetOne } from "@/lib/db";
 import { verifyJwt } from "@/lib/jwt";
 
 export async function GET(request: NextRequest) {
@@ -14,10 +14,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Invalid or expired token" }, { status: 401 });
     }
 
-    const db = getDb();
-    const user = db.prepare("SELECT id, email, name, created_at FROM users WHERE id = ?").get(payload.userId) as
+    const user = await dbGetOne("SELECT id, email, name, created_at FROM users WHERE id = ?", [payload.userId]) as
       | { id: number; email: string; name: string | null; created_at: string }
-      | undefined;
+      | null;
 
     if (!user) {
       return NextResponse.json({ success: false, error: "User not found" }, { status: 401 });

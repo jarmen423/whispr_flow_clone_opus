@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { getDb } from "@/lib/db";
+import { dbInsert } from "@/lib/db";
 import { verifyJwt } from "@/lib/jwt";
 
 const SCRIPTS_DIR = join(process.cwd(), "scripts");
@@ -35,13 +35,12 @@ export async function GET(request: NextRequest) {
 
     // Track download
     try {
-      const db = getDb();
-      db.prepare("INSERT INTO download_events (user_id, platform, ip, user_agent) VALUES (?, ?, ?, ?)").run(
-        payload.userId,
+      await dbInsert("download_events", {
+        user_id: payload.userId,
         platform,
-        request.headers.get("x-forwarded-for") || "unknown",
-        request.headers.get("user-agent") || "unknown"
-      );
+        ip: request.headers.get("x-forwarded-for") || "unknown",
+        user_agent: request.headers.get("user-agent") || "unknown",
+      });
     } catch (trackErr) {
       console.error("[Download] Tracking error:", trackErr);
     }

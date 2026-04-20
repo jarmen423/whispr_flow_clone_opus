@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { dbGetAll } from "@/lib/db";
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY || "localflow-admin-dev-key";
 
@@ -13,11 +13,7 @@ export async function GET(request: NextRequest) {
     }
 
     const format = request.nextUrl.searchParams.get("format") || "json";
-    const db = getDb();
-
-    const users = db
-      .prepare("SELECT id, email, name, created_at FROM users ORDER BY created_at DESC")
-      .all() as { id: number; email: string; name: string | null; created_at: string }[];
+    const users = await dbGetAll("SELECT id, email, name, created_at FROM users ORDER BY created_at DESC") as { id: number; email: string; name: string | null; created_at: string }[];
 
     if (format === "csv") {
       const lines = ["id,email,name,created_at"];

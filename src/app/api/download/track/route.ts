@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { dbInsert } from "@/lib/db";
 import { verifyJwt } from "@/lib/jwt";
 
 export async function POST(request: NextRequest) {
@@ -14,13 +14,12 @@ export async function POST(request: NextRequest) {
       if (payload) userId = payload.userId;
     }
 
-    const db = getDb();
-    db.prepare("INSERT INTO download_events (user_id, platform, ip, user_agent) VALUES (?, ?, ?, ?)").run(
-      userId,
+    await dbInsert("download_events", {
+      user_id: userId,
       platform,
-      request.headers.get("x-forwarded-for") || "unknown",
-      request.headers.get("user-agent") || "unknown"
-    );
+      ip: request.headers.get("x-forwarded-for") || "unknown",
+      user_agent: request.headers.get("user-agent") || "unknown",
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
