@@ -14,6 +14,17 @@ const PLATFORM_SCRIPTS: Record<string, { filename: string; contentType: string }
 
 export async function GET(request: NextRequest) {
   try {
+    // Require authentication to download
+    const token = request.cookies.get("localflow_token")?.value;
+    if (!token) {
+      return NextResponse.json({ success: false, error: "Authentication required" }, { status: 401 });
+    }
+
+    const payload = await verifyJwt(token);
+    if (!payload) {
+      return NextResponse.json({ success: false, error: "Invalid or expired session" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const platform = searchParams.get("platform")?.toLowerCase() || "windows";
 
@@ -24,23 +35,15 @@ export async function GET(request: NextRequest) {
 
     // Track download
     try {
-      const token = request.cookies.get("localflow_token")?.value;
-      let userId: number | null = null;
-      if (token) {
-        const payload = await verifyJwt(token);
-        if (payload) userId = payload.userId;
-      }
-
       const db = getDb();
       db.prepare("INSERT INTO download_events (user_id, platform, ip, user_agent) VALUES (?, ?, ?, ?)").run(
-        userId,
+        payload.userId,
         platform,
         request.headers.get("x-forwarded-for") || "unknown",
         request.headers.get("user-agent") || "unknown"
       );
     } catch (trackErr) {
       console.error("[Download] Tracking error:", trackErr);
-      // Don't fail the download if tracking fails
     }
 
     const content = readFileSync(join(SCRIPTS_DIR, script.filename), "utf-8");

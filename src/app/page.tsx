@@ -23,6 +23,7 @@ import {
   FileText,
   Menu,
   X,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,19 +48,9 @@ const staggerContainer = {
 /* ------------------------------------------------------------------ */
 /*  Navbar                                                             */
 /* ------------------------------------------------------------------ */
-function Navbar() {
+function Navbar({ user, setUser }: { user: { name: string | null; email: string } | null; setUser: (u: { name: string | null; email: string } | null) => void }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
-
-  useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) setUser(data.user);
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -236,12 +227,12 @@ function Hero() {
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <a href="#download">
+            <Link href="/signup?redirect=/">
               <Button size="lg" variant="outline" className="gap-2 text-base px-8 h-12">
                 <Download className="h-4 w-4" />
                 Download for Desktop
               </Button>
-            </a>
+            </Link>
           </motion.div>
 
           <motion.p variants={fadeInUp} className="mt-4 text-xs text-muted-foreground">
@@ -554,7 +545,7 @@ function HowItWorks() {
 /* ------------------------------------------------------------------ */
 /*  Download                                                           */
 /* ------------------------------------------------------------------ */
-function DownloadSection() {
+function DownloadSection({ user }: { user: { name: string | null; email: string } | null }) {
   return (
     <section id="download" className="py-24 md:py-32 bg-muted/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -589,13 +580,19 @@ function DownloadSection() {
             ].map((platform) => (
               <a
                 key={platform.label}
-                href={`/api/download?platform=${platform.platform}`}
+                href={user ? `/api/download?platform=${platform.platform}` : "/signup?redirect=/"}
                 className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card/50 hover:bg-card transition-colors"
               >
-                <Download className="h-5 w-5 text-primary shrink-0" />
-                <div>
+                {user ? (
+                  <Download className="h-5 w-5 text-primary shrink-0" />
+                ) : (
+                  <Lock className="h-5 w-5 text-muted-foreground shrink-0" />
+                )}
+                <div className="flex-1">
                   <div className="text-sm font-medium">{platform.label}</div>
-                  <div className="text-xs text-muted-foreground">{platform.note}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {user ? platform.note : "Create a free account to download"}
+                  </div>
                 </div>
               </a>
             ))}
@@ -714,15 +711,26 @@ function Footer() {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 export default function LandingPage() {
+  const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setUser(data.user);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <main className="min-h-screen bg-background">
-      <Navbar />
+      <Navbar user={user} setUser={setUser} />
       <Hero />
       <SocialProof />
       <Features />
       <HotkeyShowcase />
       <HowItWorks />
-      <DownloadSection />
+      <DownloadSection user={user} />
       <CTABanner />
       <Footer />
     </main>
