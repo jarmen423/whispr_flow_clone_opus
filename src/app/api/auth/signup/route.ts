@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("[Auth/Signup] Error:", error);
-    return NextResponse.json({ success: false, error: "Something went wrong" }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ success: false, error: "Something went wrong", debug: message }, { status: 500 });
   }
 }
