@@ -1,15 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Mic, Copy, Check, Terminal, Monitor, Apple, TerminalSquare, ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import {
+  Mic,
+  Copy,
+  Check,
+  Terminal,
+  Monitor,
+  Apple,
+  TerminalSquare,
+  ArrowLeft,
+  Loader2,
+  Sparkles,
+  Download,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Platform = "windows" | "macos" | "linux";
 
-const PLATFORM_CONFIG: Record<Platform, { label: string; icon: React.ElementType; color: string; command: string }> = {
+const PLATFORM_CONFIG: Record<
+  Platform,
+  { label: string; icon: React.ElementType; color: string; command: string }
+> = {
   windows: {
     label: "Windows",
     icon: Monitor,
@@ -38,11 +52,10 @@ function detectPlatform(): Platform {
 }
 
 export default function DownloadPage() {
-  const router = useRouter();
   const [platform, setPlatform] = useState<Platform>("windows");
   const [copied, setCopied] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
@@ -52,39 +65,40 @@ export default function DownloadPage() {
         setAuthChecked(true);
       })
       .catch(() => setAuthChecked(true));
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     setPlatform(detectPlatform());
   }, []);
 
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  const config = PLATFORM_CONFIG[platform];
-  const Icon = config.icon;
-
   const copyCommand = () => {
-    navigator.clipboard.writeText(config.command);
+    navigator.clipboard.writeText(PLATFORM_CONFIG[platform].command);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const config = PLATFORM_CONFIG[platform];
+  const Icon = config.icon;
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 px-4 sm:px-6 lg:px-8 py-4">
+      <div className="absolute top-0 left-0 right-0 px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 w-fit">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
             <Mic className="h-5 w-5 text-primary" />
           </div>
           <span className="text-xl font-bold gradient-text">LocalFlow</span>
         </Link>
+        {user ? (
+          <Link href="/dashboard">
+            <Button variant="ghost" size="sm">Dashboard</Button>
+          </Link>
+        ) : (
+          <Link href="/signup">
+            <Button variant="ghost" size="sm">Sign up free</Button>
+          </Link>
+        )}
       </div>
 
       <motion.div
@@ -94,36 +108,14 @@ export default function DownloadPage() {
         transition={{ duration: 0.5 }}
       >
         <div className="mb-8">
-          <div className={`inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-muted mb-4`}>
+          <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-muted mb-4">
             <Icon className={`h-8 w-8 ${config.color}`} />
           </div>
           <h1 className="text-3xl font-bold mb-2">Install LocalFlow</h1>
           <p className="text-muted-foreground">
-            One command to install on {config.label}. Copy, paste, run.
+            One command to install on {config.label}. No signup required.
           </p>
         </div>
-
-        {/* Anonymous user nudge */}
-        {!user && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mb-6 p-4 rounded-xl border border-primary/20 bg-primary/5 text-left"
-          >
-            <div className="flex items-start gap-3">
-              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium">Want cloud-synced history & settings?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Create a free account to unlock the web dashboard and sync across devices.{" "}
-                  <Link href="/signup?redirect=/download" className="text-primary hover:underline font-medium">
-                    Sign up free →
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {/* Platform tabs */}
         <div className="flex justify-center gap-2 mb-6">
@@ -166,7 +158,9 @@ export default function DownloadPage() {
         {/* Steps */}
         <div className="text-left space-y-3 mb-8">
           <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">1</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">
+              1
+            </span>
             <p className="text-sm text-muted-foreground">
               {platform === "windows"
                 ? "Open PowerShell (press Win + X, then select 'Terminal' or 'PowerShell')"
@@ -174,30 +168,59 @@ export default function DownloadPage() {
             </p>
           </div>
           <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">2</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">
+              2
+            </span>
             <p className="text-sm text-muted-foreground">
               Paste the command above and press Enter
             </p>
           </div>
           <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">3</span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground shrink-0">
+              3
+            </span>
             <p className="text-sm text-muted-foreground">
-              The installer will set everything up automatically. Hold Alt+L to start dictating.
+              The installer sets everything up. Hold <kbd className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono">Alt+L</kbd> to start dictating.
             </p>
           </div>
         </div>
 
-        {/* Script download fallback */}
+        {/* Manual download fallback */}
         <p className="text-xs text-muted-foreground mb-8">
-          Prefer a file?{" "}
+          Prefer to inspect the script first?{" "}
           <a
             href={`/api/download?platform=${platform}`}
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-primary hover:underline"
           >
-            Download the install script
-          </a>{" "}
-          instead.
+            View the install script
+          </a>
+          .
         </p>
+
+        {/* Upgrade nudge for anonymous users */}
+        {!user && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="mb-8 p-4 rounded-xl border border-primary/20 bg-primary/5 text-left"
+          >
+            <div className="flex items-start gap-3">
+              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium">Love LocalFlow?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Create a free account to unlock dictation history, cloud sync across devices, and custom AI formatting.{" "}
+                  <Link href="/signup" className="text-primary hover:underline font-medium">
+                    Sign up free →
+                  </Link>
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         <Link href="/">
           <Button variant="ghost" size="sm" className="gap-1.5">
