@@ -9,7 +9,10 @@ export async function POST(request: NextRequest) {
   try {
     trace.push("start");
     trace.push("before_json");
-    const body = await request.json();
+    const rawBody = await request.text();
+    trace.push("raw_body_len:" + rawBody.length);
+    trace.push("raw_body:" + rawBody.substring(0, 200));
+    const body = JSON.parse(rawBody);
     trace.push("after_json");
     trace.push("body_type:" + typeof body);
     trace.push("body_keys:" + (body && typeof body === "object" ? Object.keys(body).join(",") : "n/a"));
