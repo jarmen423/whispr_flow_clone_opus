@@ -139,9 +139,16 @@ function migrateSqlite(db: DatabaseType) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS install_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id);
     CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_installs_created ON install_events(created_at);
   `);
 }
 
@@ -149,9 +156,11 @@ export async function runMigrations() {
   if (IS_POSTGRES && sqlClient) {
     await sqlClient.query("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT, password_hash TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
     await sqlClient.query("CREATE TABLE IF NOT EXISTS download_events (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), platform TEXT, ip TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+    await sqlClient.query("CREATE TABLE IF NOT EXISTS install_events (id SERIAL PRIMARY KEY, platform TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)");
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id)");
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at)");
+    await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_installs_created ON install_events(created_at)");
   }
 }
 

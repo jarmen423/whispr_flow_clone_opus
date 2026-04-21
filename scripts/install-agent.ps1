@@ -142,6 +142,13 @@ $Shortcut.IconLocation = "powershell.exe,0"
 $Shortcut.Save()
 Write-Ok "Start Menu shortcut created"
 
+# --- Anonymous install ping (no PII, fails silently) ---
+try {
+    Invoke-RestMethod -Uri "https://dictate.agentmemorylabs.com/api/install-ping?platform=windows" -Method GET -TimeoutSec 5 | Out-Null
+} catch {
+    # Silently ignore ping failures
+}
+
 # --- Summary ---
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green

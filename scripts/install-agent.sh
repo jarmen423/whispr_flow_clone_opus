@@ -146,6 +146,9 @@ EOF
     ok "Desktop entry created"
 fi
 
+# --- Anonymous install ping (no PII, fails silently) ---
+curl -s "https://dictate.agentmemorylabs.com/api/install-ping?platform=${OS}" > /dev/null 2>&1 || true
+
 # --- Summary ---
 echo ""
 echo "============================================"
