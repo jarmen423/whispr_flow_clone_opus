@@ -69,3 +69,4 @@ temp/
 agent/localflow-agent.py.bak
 .gitignore
 .vercel
+.env*.local
