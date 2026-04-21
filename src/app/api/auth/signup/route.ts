@@ -4,28 +4,11 @@ import { dbGetOne, dbInsert } from "@/lib/db";
 import { signJwt } from "@/lib/jwt";
 
 export async function POST(request: NextRequest) {
-  const trace: string[] = [];
-
   try {
-    trace.push("start");
-    trace.push("before_json");
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch (parseErr) {
-      trace.push("json_caught");
-      const raw = await request.text().catch(() => "(could not read body)");
-      trace.push("parse_err:" + (parseErr instanceof Error ? parseErr.message : String(parseErr)));
-      trace.push("raw_body:" + raw.substring(0, 200));
-      throw parseErr;
-    }
-    trace.push("after_json");
-    trace.push("parsed_body:" + JSON.stringify(body).substring(0, 50));
-    trace.push("before_destructure");
-    const email = (body as Record<string, unknown>).email;
-    const password = (body as Record<string, unknown>).password;
-    const name = (body as Record<string, unknown>).name;
-    trace.push("after_destructure");
+    const body = await request.json();
+    const email = body?.email;
+    const password = body?.password;
+    const name = body?.name;
 
     if (!email || !password || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ success: false, error: "Email and password are required" }, { status: 400 });
@@ -35,28 +18,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Password must be at least 6 characters" }, { status: 400 });
     }
 
-    trace.push("checking_existing");
     const existing = await dbGetOne("SELECT id FROM users WHERE email = ?", [email.toLowerCase().trim()]);
-    trace.push("existing:" + (existing ? "yes" : "no"));
     if (existing) {
       return NextResponse.json({ success: false, error: "An account with this email already exists" }, { status: 409 });
     }
 
-    trace.push("hashing");
     const passwordHash = await bcrypt.hash(password, 10);
-    trace.push("hashed");
-
-    trace.push("inserting");
     const userId = await dbInsert("users", {
       email: email.toLowerCase().trim(),
       name: (name as string | undefined)?.trim() || null,
       password_hash: passwordHash,
     });
-    trace.push("inserted:" + userId);
 
-    trace.push("signing_jwt");
     const token = await signJwt({ userId, email: email.toLowerCase().trim() });
-    trace.push("jwt_done");
 
     const response = NextResponse.json({
       success: true,
@@ -71,11 +45,9 @@ export async function POST(request: NextRequest) {
       path: "/",
     });
 
-    trace.push("done");
     return response;
   } catch (error) {
     console.error("[Auth/Signup] Error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ success: false, error: "Something went wrong", debug: message, trace }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Something went wrong" }, { status: 500 });
   }
 }
