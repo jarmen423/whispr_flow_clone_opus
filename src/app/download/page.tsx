@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Mic, Copy, Check, Terminal, Monitor, Apple, TerminalSquare, ArrowLeft, Loader2 } from "lucide-react";
+import { Mic, Copy, Check, Terminal, Monitor, Apple, TerminalSquare, ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Platform = "windows" | "macos" | "linux";
@@ -42,18 +42,16 @@ export default function DownloadPage() {
   const [platform, setPlatform] = useState<Platform>("windows");
   const [copied, setCopied] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
       .then((r) => r.json())
       .then((data) => {
-        if (!data.success) {
-          router.replace("/signup?redirect=/download");
-        } else {
-          setAuthChecked(true);
-        }
+        if (data.success) setUser(data.user);
+        setAuthChecked(true);
       })
-      .catch(() => router.replace("/signup?redirect=/download"));
+      .catch(() => setAuthChecked(true));
   }, [router]);
 
   useEffect(() => {
@@ -104,6 +102,28 @@ export default function DownloadPage() {
             One command to install on {config.label}. Copy, paste, run.
           </p>
         </div>
+
+        {/* Anonymous user nudge */}
+        {!user && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mb-6 p-4 rounded-xl border border-primary/20 bg-primary/5 text-left"
+          >
+            <div className="flex items-start gap-3">
+              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium">Want cloud-synced history & settings?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Create a free account to unlock the web dashboard and sync across devices.{" "}
+                  <Link href="/signup?redirect=/download" className="text-primary hover:underline font-medium">
+                    Sign up free →
+                  </Link>
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Platform tabs */}
         <div className="flex justify-center gap-2 mb-6">
