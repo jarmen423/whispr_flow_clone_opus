@@ -405,7 +405,11 @@ export default function LocalFlowPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold gradient-text">LocalFlow</h1>
-              <p className="text-sm text-muted-foreground">Smart Dictation System</p>
+              <p className="text-sm text-muted-foreground">
+                <a href="https://agentmemorylabs.com" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
+                  Built by Agent Memory Labs ↗
+                </a>
+              </p>
             </div>
           </Link>
 

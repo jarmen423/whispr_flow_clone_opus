@@ -87,6 +87,9 @@ function Navbar({ user, setUser }: { user: { name: string | null; email: string 
             <a href="#download" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Download
             </a>
+            <a href="https://agentmemorylabs.com" target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:text-primary/80 transition-colors">
+              Agent Memory Labs ↗
+            </a>
           </div>
 
           {/* CTA buttons */}
@@ -659,6 +662,97 @@ function FreeVsAccount() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Agent Memory Labs Bridge — top-of-funnel CTA                       */
+/* ------------------------------------------------------------------ */
+function AgentMemoryLabsBridge() {
+  return (
+    <section className="py-24 md:py-32 border-y border-border/50">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <motion.div
+          className="grid lg:grid-cols-2 gap-12 items-center"
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true }}
+          variants={staggerContainer}
+        >
+          <div>
+            <motion.div variants={fadeInUp} className="mb-4">
+              <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-1.5 text-sm font-medium text-primary">
+                From the makers of LocalFlow
+              </span>
+            </motion.div>
+            <motion.h2 variants={fadeInUp} className="text-3xl md:text-4xl font-bold mb-4">
+              Building AI agents that{" "}
+              <span className="gradient-text">never forget</span>
+            </motion.h2>
+            <motion.p variants={fadeInUp} className="text-muted-foreground text-lg mb-6 leading-relaxed">
+              Agent Memory Labs gives your AI agents persistent memory, knowledge graphs, and
+              long-term context — so every conversation builds on the last.
+            </motion.p>
+            <motion.ul variants={fadeInUp} className="space-y-3 mb-8">
+              {[
+                "Vector memory stores for every agent",
+                "Knowledge graphs that connect concepts",
+                "Long-term context across sessions",
+                "Hosted infrastructure, zero setup",
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  {item}
+                </li>
+              ))}
+            </motion.ul>
+            <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row gap-4">
+              <a href="https://agentmemorylabs.com" target="_blank" rel="noopener noreferrer">
+                <Button size="lg" className="gap-2">
+                  Visit Agent Memory Labs
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </a>
+              <a href="https://github.com/jarmen423/agent-memory-hosted" target="_blank" rel="noopener noreferrer">
+                <Button size="lg" variant="outline">
+                  View on GitHub
+                </Button>
+              </a>
+            </motion.div>
+          </div>
+
+          <motion.div variants={fadeInUp} className="relative">
+            <div className="absolute inset-0 bg-primary/5 rounded-3xl blur-2xl" />
+            <div className="relative rounded-2xl border border-border bg-card p-8 shadow-xl">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Agent Memory Labs</h3>
+                  <p className="text-xs text-muted-foreground">agentmemorylabs.com</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-muted/50 border border-border">
+                  <p className="text-sm text-muted-foreground mb-2">User asks:</p>
+                  <p className="text-sm">&ldquo;What did we decide about the pricing model last week?&rdquo;</p>
+                </div>
+                <div className="flex justify-center">
+                  <div className="h-8 w-px bg-border" />
+                </div>
+                <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+                  <p className="text-sm text-muted-foreground mb-2">Agent recalls from memory:</p>
+                  <p className="text-sm">
+                    &ldquo;You chose a freemium model with $0 entry and $29/mo Pro tier. You wanted to keep the free tier generous to drive top-of-funnel leads.&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Download                                                           */
 /* ------------------------------------------------------------------ */
 function DownloadSection({ user }: { user: { name: string | null; email: string } | null }) {
@@ -789,7 +883,7 @@ function Footer() {
   return (
     <footer className="border-t border-border py-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid md:grid-cols-4 gap-8 mb-8">
+        <div className="grid md:grid-cols-5 gap-8 mb-8">
           <div className="md:col-span-2">
             <Link href="/" className="flex items-center gap-2.5 mb-4">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
@@ -820,6 +914,14 @@ function Footer() {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li><Link href="/signup" className="hover:text-foreground transition-colors">Sign up</Link></li>
               <li><Link href="/login" className="hover:text-foreground transition-colors">Log in</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold mb-3">Company</h4>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li><a href="https://agentmemorylabs.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Agent Memory Labs</a></li>
+              <li><a href="https://github.com/jarmen423" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">GitHub</a></li>
             </ul>
           </div>
         </div>
@@ -865,6 +967,7 @@ export default function LandingPage() {
       <HotkeyShowcase />
       <HowItWorks />
       <FreeVsAccount />
+      <AgentMemoryLabsBridge />
       <DownloadSection user={user} />
       <CTABanner user={user} />
       <Footer />
