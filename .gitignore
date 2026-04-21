@@ -70,3 +70,9 @@ agent/localflow-agent.py.bak
 .gitignore
 .vercel
 .env*.local
+
+# LocalFlow SQLite database
+localflow.db
+localflow.db-shm
+localflow.db-wal
+

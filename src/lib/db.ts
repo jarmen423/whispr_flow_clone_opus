@@ -2,12 +2,12 @@
  * LocalFlow Database Layer
  *
  * Uses Neon serverless Postgres in production (Vercel) and SQLite for local dev.
- * This avoids native module issues on serverless while keeping local development simple.
+ * SQLite import is lazy so native modules never load on serverless.
  */
 
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-import Database from "better-sqlite3";
+import { neon } from "@neondatabase/serverless";
 import { join } from "path";
+import type DatabaseType from "better-sqlite3";
 
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 const IS_POSTGRES = !!DATABASE_URL;
@@ -16,20 +16,21 @@ const IS_POSTGRES = !!DATABASE_URL;
 let sqlClient: ((query: string, params?: unknown[]) => Promise<unknown>) | null = null;
 if (IS_POSTGRES && DATABASE_URL) {
   sqlClient = neon(DATABASE_URL) as unknown as (query: string, params?: unknown[]) => Promise<unknown>;
-  // Run Postgres migrations on module load (idempotent)
   runMigrations().catch((err) => console.error("[DB] Migration failed:", err));
 }
 
 // SQLite client (local dev fallback) — lazy init to avoid build-time locks
-let sqliteDb: Database | null = null;
-function getSqliteDb(): Database {
+let sqliteDb: unknown = null;
+async function getSqliteDb() {
   if (!sqliteDb) {
+    const { default: Database } = await import("better-sqlite3");
     const DB_PATH = process.env.LOCALFLOW_DB_PATH || join(process.cwd(), "localflow.db");
-    sqliteDb = new Database(DB_PATH);
-    sqliteDb.pragma("journal_mode = WAL");
-    migrateSqlite(sqliteDb);
+    const db = new Database(DB_PATH);
+    db.pragma("journal_mode = WAL");
+    migrateSqlite(db);
+    sqliteDb = db;
   }
-  return sqliteDb;
+  return sqliteDb as DatabaseType;
 }
 
 /* ------------------------------------------------------------------ */
@@ -38,7 +39,6 @@ function getSqliteDb(): Database {
 
 function pgQuery(sqlStr: string, params: unknown[] = []) {
   if (!sqlClient) throw new Error("Postgres client not initialized");
-  // Replace ? placeholders with $1, $2, etc.
   let i = 0;
   const pgSql = sqlStr.replace(/\?/g, () => `$${++i}`);
   return sqlClient(pgSql, params) as Promise<unknown>;
@@ -65,26 +65,26 @@ async function pgInsert(table: string, data: Record<string, unknown>) {
 /*  SQLite helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-function sqliteQuery(sqlStr: string, params: unknown[] = []) {
-  const db = getSqliteDb();
+async function sqliteQuery(sqlStr: string, params: unknown[] = []) {
+  const db = await getSqliteDb();
   const stmt = db.prepare(sqlStr);
   return stmt.run(...params);
 }
 
-function sqliteGetOne(sqlStr: string, params: unknown[] = []) {
-  const db = getSqliteDb();
+async function sqliteGetOne(sqlStr: string, params: unknown[] = []) {
+  const db = await getSqliteDb();
   const stmt = db.prepare(sqlStr);
   return stmt.get(...params) as Record<string, unknown> | undefined || null;
 }
 
-function sqliteGetAll(sqlStr: string, params: unknown[] = []) {
-  const db = getSqliteDb();
+async function sqliteGetAll(sqlStr: string, params: unknown[] = []) {
+  const db = await getSqliteDb();
   const stmt = db.prepare(sqlStr);
   return stmt.all(...params) as Record<string, unknown>[];
 }
 
-function sqliteInsert(table: string, data: Record<string, unknown>) {
-  const db = getSqliteDb();
+async function sqliteInsert(table: string, data: Record<string, unknown>) {
+  const db = await getSqliteDb();
   const keys = Object.keys(data);
   const placeholders = keys.map(() => "?").join(", ");
   const sqlStr = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
@@ -120,7 +120,7 @@ export async function dbInsert(table: string, data: Record<string, unknown>) {
 /*  Migrations                                                        */
 /* ------------------------------------------------------------------ */
 
-function migrateSqlite(db: Database) {
+function migrateSqlite(db: DatabaseType) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
