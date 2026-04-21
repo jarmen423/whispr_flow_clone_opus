@@ -14,17 +14,6 @@ const PLATFORM_SCRIPTS: Record<string, { filename: string; contentType: string }
 
 export async function GET(request: NextRequest) {
   try {
-    // Require authentication to download
-    const token = request.cookies.get("localflow_token")?.value;
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Authentication required" }, { status: 401 });
-    }
-
-    const payload = await verifyJwt(token);
-    if (!payload) {
-      return NextResponse.json({ success: false, error: "Invalid or expired session" }, { status: 401 });
-    }
-
     const { searchParams } = new URL(request.url);
     const platform = searchParams.get("platform")?.toLowerCase() || "windows";
 
@@ -33,10 +22,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Invalid platform" }, { status: 400 });
     }
 
-    // Track download
+    // Try to identify user for tracking, but don't require auth
+    let userId: number | null = null;
+    try {
+      const token = request.cookies.get("localflow_token")?.value;
+      if (token) {
+        const payload = await verifyJwt(token);
+        if (payload && typeof payload.userId === "number") {
+          userId = payload.userId;
+        }
+      }
+    } catch {
+      // ignore auth errors for tracking
+    }
+
+    // Track download (best effort)
     try {
       await dbInsert("download_events", {
-        user_id: payload.userId,
+        user_id: userId,
         platform,
         ip: request.headers.get("x-forwarded-for") || "unknown",
         user_agent: request.headers.get("user-agent") || "unknown",

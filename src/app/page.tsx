@@ -559,16 +559,27 @@ function DownloadSection({ user }: { user: { name: string | null; email: string 
             Ready to <span className="gradient-text">start dictating?</span>
           </motion.h2>
           <motion.p variants={fadeInUp} className="text-muted-foreground text-lg mb-10">
-            Create your free account to download the desktop agent and unlock all features.
+            {user
+              ? "Download the desktop agent and start speaking instead of typing."
+              : "Create your free account to download the desktop agent and unlock all features."}
           </motion.p>
 
           <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/signup">
-              <Button size="lg" className="gap-2 text-base px-8 h-12">
-                <Sparkles className="h-4 w-4" />
-                Create Free Account
-              </Button>
-            </Link>
+            {user ? (
+              <Link href="/download">
+                <Button size="lg" className="gap-2 text-base px-8 h-12">
+                  <Download className="h-4 w-4" />
+                  Download for Desktop
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/signup">
+                <Button size="lg" className="gap-2 text-base px-8 h-12">
+                  <Sparkles className="h-4 w-4" />
+                  Create Free Account
+                </Button>
+              </Link>
+            )}
           </motion.div>
 
           <motion.div variants={fadeInUp} className="mt-12 grid sm:grid-cols-3 gap-6 text-left">
@@ -579,7 +590,7 @@ function DownloadSection({ user }: { user: { name: string | null; email: string 
             ].map((platform) => (
               <Link
                 key={platform.label}
-                href="/download"
+                href={user ? "/download" : "/signup"}
                 className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card/50 hover:bg-card transition-colors"
               >
                 <Download className="h-5 w-5 text-primary shrink-0" />
@@ -599,7 +610,7 @@ function DownloadSection({ user }: { user: { name: string | null; email: string 
 /* ------------------------------------------------------------------ */
 /*  CTA Banner                                                         */
 /* ------------------------------------------------------------------ */
-function CTABanner() {
+function CTABanner({ user }: { user: { name: string | null; email: string } | null }) {
   return (
     <section className="py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -619,20 +630,33 @@ function CTABanner() {
               Stop typing. Start speaking.
             </motion.h2>
             <motion.p variants={fadeInUp} className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
-              Join thousands of developers, writers, and productivity hackers who dictate faster than they type.
+              {user
+                ? "Your account is ready. Download the agent and start dictating right now."
+                : "Join thousands of developers, writers, and productivity hackers who dictate faster than they type."}
             </motion.p>
             <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/signup">
-                <Button size="lg" className="gap-2 text-base px-8 h-12">
-                  Get Started Free
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link href="/login">
-                <Button size="lg" variant="outline" className="text-base px-8 h-12">
-                  Already have an account?
-                </Button>
-              </Link>
+              {user ? (
+                <Link href="/download">
+                  <Button size="lg" className="gap-2 text-base px-8 h-12">
+                    Download Now
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              ) : (
+                <>
+                  <Link href="/signup">
+                    <Button size="lg" className="gap-2 text-base px-8 h-12">
+                      Get Started Free
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </Link>
+                  <Link href="/login">
+                    <Button size="lg" variant="outline" className="text-base px-8 h-12">
+                      Already have an account?
+                    </Button>
+                  </Link>
+                </>
+              )}
             </motion.div>
           </div>
         </motion.div>
@@ -724,7 +748,7 @@ export default function LandingPage() {
       <HotkeyShowcase />
       <HowItWorks />
       <DownloadSection user={user} />
-      <CTABanner />
+      <CTABanner user={user} />
       <Footer />
     </main>
   );
