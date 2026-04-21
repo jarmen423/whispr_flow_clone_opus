@@ -5,7 +5,7 @@
  * SQLite import is lazy so native modules never load on serverless.
  */
 
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { join } from "path";
 import type DatabaseType from "better-sqlite3";
 
@@ -13,9 +13,9 @@ const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 const IS_POSTGRES = !!DATABASE_URL;
 
 // Postgres client (Neon)
-let sqlClient: ((query: string, params?: unknown[]) => Promise<unknown>) | null = null;
+let sqlClient: NeonQueryFunction<false, false> | null = null;
 if (IS_POSTGRES && DATABASE_URL) {
-  sqlClient = neon(DATABASE_URL) as unknown as (query: string, params?: unknown[]) => Promise<unknown>;
+  sqlClient = neon(DATABASE_URL);
   runMigrations().catch((err) => console.error("[DB] Migration failed:", err));
 }
 
@@ -41,7 +41,7 @@ function pgQuery(sqlStr: string, params: unknown[] = []) {
   if (!sqlClient) throw new Error("Postgres client not initialized");
   let i = 0;
   const pgSql = sqlStr.replace(/\?/g, () => `$${++i}`);
-  return sqlClient(pgSql, params) as Promise<unknown>;
+  return sqlClient.query(pgSql, params) as Promise<unknown>;
 }
 
 async function pgGetOne(sqlStr: string, params: unknown[] = []) {
@@ -147,11 +147,11 @@ function migrateSqlite(db: DatabaseType) {
 
 export async function runMigrations() {
   if (IS_POSTGRES && sqlClient) {
-    await sqlClient("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT, password_hash TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-    await sqlClient("CREATE TABLE IF NOT EXISTS download_events (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), platform TEXT, ip TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-    await sqlClient("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)");
-    await sqlClient("CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id)");
-    await sqlClient("CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at)");
+    await sqlClient.query("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT, password_hash TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+    await sqlClient.query("CREATE TABLE IF NOT EXISTS download_events (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), platform TEXT, ip TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+    await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)");
+    await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id)");
+    await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at)");
   }
 }
 

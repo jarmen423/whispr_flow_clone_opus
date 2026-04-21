@@ -47,9 +47,6 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("[Auth/Signup] Error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    const stack = error instanceof Error ? error.stack : "";
-    const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "(not set)";
-    return NextResponse.json({ success: false, error: "Something went wrong", debug: message, stack, dbUrl: dbUrl.substring(0, 30) + "..." }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Something went wrong" }, { status: 500 });
   }
 }
