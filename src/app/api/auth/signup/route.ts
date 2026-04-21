@@ -8,17 +8,22 @@ export async function POST(request: NextRequest) {
 
   try {
     trace.push("start");
+    trace.push("before_json");
     let body: unknown;
     try {
       body = await request.json();
     } catch (parseErr) {
+      trace.push("json_caught");
       const raw = await request.text().catch(() => "(could not read body)");
       trace.push("parse_err:" + (parseErr instanceof Error ? parseErr.message : String(parseErr)));
       trace.push("raw_body:" + raw.substring(0, 200));
       throw parseErr;
     }
+    trace.push("after_json");
     trace.push("parsed_body:" + JSON.stringify(body).substring(0, 50));
+    trace.push("before_destructure");
     const { email, password, name } = body as Record<string, unknown>;
+    trace.push("after_destructure");
 
     if (!email || !password || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ success: false, error: "Email and password are required" }, { status: 400 });
