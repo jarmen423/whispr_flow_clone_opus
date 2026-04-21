@@ -9,6 +9,9 @@ export async function POST(request: NextRequest) {
   try {
     trace.push("start");
     trace.push("before_json");
+    trace.push("bodyUsed:" + (request as any).bodyUsed);
+    trace.push("bodyNull:" + (request.body === null));
+    trace.push("bodyLocked:" + (request.body ? (request.body as any).locked : "n/a"));
     const rawBody = await request.text();
     trace.push("raw_body_len:" + rawBody.length);
     trace.push("raw_body:" + rawBody.substring(0, 200));
