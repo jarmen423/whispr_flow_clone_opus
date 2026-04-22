@@ -45,7 +45,7 @@ Configuration:
 Example:
     $ python localflow-agent.py
     [2024-01-15 10:30:00] [INFO] LocalFlow Desktop Agent
-    [2024-01-15 10:30:00] [INFO] Listening for hotkey: alt+z
+    [2024-01-15 10:30:00] [INFO] Listening for hotkey: alt+l
 """
 
 import os
@@ -115,7 +115,7 @@ class Config:
             dictation and reduces bandwidth requirements.
         dtype: Audio data type. "int16" provides 16-bit PCM encoding
             compatible with standard WAV format and Whisper models.
-        hotkey: Global hotkey combination string (e.g., "alt+z") that
+        hotkey: Global hotkey combination string (e.g., "alt+l") that
             triggers recording when pressed and held.
         format_hotkey: Secondary hotkey that enables LLM post-processing
             for formatting and structuring the transcribed text.
@@ -141,7 +141,7 @@ class Config:
     sample_rate: int = 16000  # Whisper.cpp native rate
     channels: int = 1  # Mono
     dtype: str = "int16"  # 16-bit PCM
-    hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+z")
+    hotkey: str = os.getenv("LOCALFLOW_HOTKEY", "alt+l")
     format_hotkey: str = os.getenv("LOCALFLOW_FORMAT_HOTKEY", "alt+m")
     translate_hotkey: str = os.getenv("LOCALFLOW_TRANSLATE_HOTKEY", "alt+t")  # Toggle translation mode
     cleanup_hotkey: str = os.getenv("LOCALFLOW_CLEANUP_HOTKEY", "alt+n")
@@ -1237,7 +1237,7 @@ class LocalFlowAgent:
     def _parse_hotkey(self, hotkey_str: str) -> set:
         """Parse a hotkey string into virtual key codes.
 
-        Converts human-readable hotkey strings like "alt+z" into sets
+        Converts human-readable hotkey strings like "alt+l" into sets
         of Windows virtual key codes (VK codes) used for low-level
         keyboard event matching. Supports modifier keys (alt, ctrl,
         shift) and special characters.
@@ -1249,7 +1249,7 @@ class LocalFlowAgent:
               162=Ctrl, 160=Shift, 191=OEM_2)
 
         Args:
-            hotkey_str: Hotkey combination string like "alt+z",
+            hotkey_str: Hotkey combination string like "alt+l",
                 "ctrl+shift+f", or "alt+/". Case insensitive.
 
         Returns:
@@ -1258,7 +1258,7 @@ class LocalFlowAgent:
 
         Example:
             >>> agent = LocalFlowAgent()
-            >>> codes = agent._parse_hotkey("alt+z")
+            >>> codes = agent._parse_hotkey("alt+l")
             >>> print(codes)
             {164, 90}
         """
@@ -1575,7 +1575,7 @@ class LocalFlowAgent:
             >>> agent = LocalFlowAgent()
             >>> agent.run()  # Blocks here, press Ctrl+C to exit
             [INFO] LocalFlow Desktop Agent
-            [INFO] Listening for hotkey: alt+z
+            [INFO] Listening for hotkey: alt+l
             ^C[INFO] Shutting down...
         """
         log_info("=" * 60)
