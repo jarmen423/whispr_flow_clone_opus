@@ -142,6 +142,8 @@ interface TranscribeRequest {
   mode?: "cloud" | "networked-local" | "local";
   /** Whether to translate non-English audio to English */
   translate?: boolean;
+  /** User's Groq API key for BYOK cloud transcription */
+  apiKey?: string;
 }
 
 /**
@@ -232,14 +234,17 @@ function countWords(text: string): number {
  * @param requestedMode - Mode requested by client (optional)
  * @returns "cloud" | "networked-local" | "local" - Effective mode
  */
-function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" | "local" {
+function getEffectiveMode(
+  requestedMode?: string,
+  apiKey?: string
+): "cloud" | "networked-local" | "local" {
   const mode = requestedMode || PROCESSING_MODE;
 
-  // Cloud mode requires API key
+  // Cloud mode requires API key (either per-request or env)
   if (mode === "cloud") {
-    if (!ZAI_API_KEY) {
+    if (!apiKey && !ZAI_API_KEY) {
       console.warn(
-        "[Transcribe] Cloud mode requested but GROQ_API_KEY not set, falling back to networked-local"
+        "[Transcribe] Cloud mode requested but no GROQ_API_KEY provided, falling back to networked-local"
       );
       return WHISPER_API_URL ? "networked-local" : "local";
     }
@@ -293,11 +298,14 @@ function getEffectiveMode(requestedMode?: string): "cloud" | "networked-local" |
  */
 async function transcribeCloud(
   audioBase64: string,
-  translate: boolean = false
+  translate: boolean = false,
+  apiKey?: string
 ): Promise<{ text: string; processingTime: number }> {
   const startTime = Date.now();
 
-  if (!ZAI_API_KEY) {
+  const effectiveKey = apiKey || ZAI_API_KEY;
+
+  if (!effectiveKey) {
     throw new Error(
       "GROQ_API_KEY is required for cloud mode. " + "Get your API key from: https://console.groq.com/keys"
     );
@@ -340,7 +348,7 @@ async function transcribeCloud(
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${ZAI_API_KEY}`,
+        Authorization: `Bearer ${effectiveKey}`,
       },
       body: formData,
       signal: AbortSignal.timeout(60000), // 60 second timeout
@@ -847,14 +855,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transcrib
       );
     }
 
-    const mode = getEffectiveMode(body.mode);
+    const mode = getEffectiveMode(body.mode, body.apiKey);
     const translate = body.translate === true;
 
     let result: { text: string; processingTime?: number };
 
     switch (mode) {
       case "cloud":
-        result = await transcribeCloud(body.audio, translate);
+        result = await transcribeCloud(body.audio, translate, body.apiKey);
         break;
       case "networked-local":
         result = await transcribeNetworkedLocal(body.audio, translate);

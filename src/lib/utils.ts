@@ -295,6 +295,8 @@ export interface Settings {
   translate: boolean;
   /** Whether selected-text formatting is enabled in the desktop agent */
   selectionFormatterEnabled: boolean;
+  /** User's Groq API key for BYOK cloud transcription */
+  apiKey?: string;
 }
 
 /**
@@ -317,6 +319,7 @@ export const defaultSettings: Settings = {
   soundEnabled: true,
   translate: false,
   selectionFormatterEnabled: true,
+  apiKey: "",
 };
 
 /**

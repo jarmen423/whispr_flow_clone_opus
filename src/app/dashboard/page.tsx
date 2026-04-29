@@ -19,12 +19,15 @@ import {
   Download,
   History,
   Trash2,
+  Key,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -251,6 +254,7 @@ export default function LocalFlowPage() {
           audio: audioBase64,
           mode: settings.processingMode,
           translate: settings.translate,
+          apiKey: settings.apiKey,
         }),
       });
 
@@ -512,6 +516,34 @@ export default function LocalFlowPage() {
                         : settings.processingMode === "networked-local"
                         ? "Use your remote Whisper/Ollama servers on the network"
                         : "Free offline processing on your machine"}
+                    </p>
+                  </div>
+
+                  {/* API Key */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Key className="h-3.5 w-3.5" />
+                      Groq API Key
+                    </Label>
+                    <Input
+                      type="password"
+                      placeholder="gsk_..."
+                      value={settings.apiKey || ""}
+                      onChange={(e) => updateSettings({ apiKey: e.target.value })}
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Required for cloud transcription.{" "}
+                      <a
+                        href="https://console.groq.com/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        Get your key
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      . Stored locally in your browser.
                     </p>
                   </div>
 

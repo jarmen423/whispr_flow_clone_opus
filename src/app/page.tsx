@@ -87,6 +87,9 @@ function Navbar({ user, setUser }: { user: { name: string | null; email: string 
             <a href="#download" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Download
             </a>
+            <Link href="/setup" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Setup
+            </Link>
             <a href="https://agentmemorylabs.com" target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:text-primary/80 transition-colors">
               Agent Memory Labs ↗
             </a>
@@ -151,6 +154,9 @@ function Navbar({ user, setUser }: { user: { name: string | null; email: string 
             <a href="#download" onClick={() => setMobileOpen(false)} className="block text-sm text-muted-foreground hover:text-foreground">
               Download
             </a>
+            <Link href="/setup" onClick={() => setMobileOpen(false)} className="block text-sm text-muted-foreground hover:text-foreground">
+              Setup
+            </Link>
             <div className="pt-2 flex gap-3">
               {user ? (
                 <>

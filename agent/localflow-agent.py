@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""LocalFlow Desktop Agent - System-wide dictation client with WebSocket communication.
+"""LocalFlow Desktop Agent - System-wide dictation client with hosted API.
 
 This module provides the LocalFlow Desktop Agent, a system-wide dictation tool that
-captures audio via global hotkeys and transmits it to the LocalFlow server for
+captures audio via global hotkeys and sends it to the hosted LocalFlow API for
 real-time transcription and AI-powered refinement. It serves as the client-side
 component of the LocalFlow voice-to-text infrastructure.
 
@@ -10,19 +10,20 @@ Purpose & Reasoning:
     The agent was created to provide seamless, hands-free dictation capabilities
     across all applications on the desktop. Unlike traditional dictation software
     that requires switching contexts, this agent uses global hotkeys (via pynput)
-    to capture audio at any time, then leverages WebSocket connections (socketio)
-    for real-time communication with the LocalFlow server where the actual
-    transcription and LLM-based refinement occurs.
+    to capture audio at any time, then sends it via HTTP POST to the hosted
+    LocalFlow API (dictate.agentmemorylabs.com) for transcription and LLM-based
+    refinement. Users bring their own Groq API key (BYOK) for cloud transcription.
 
 Dependencies:
     External Services:
-        - LocalFlow WebSocket server (default: localhost:3002)
+        - LocalFlow hosted API (default: https://dictate.agentmemorylabs.com)
+        - Groq API (user-provided key for transcription)
     
     Python Packages:
         - pynput: Global hotkey listening across all applications
         - sounddevice: Cross-platform audio capture from default input device
         - scipy: WAV file encoding for audio transmission
-        - python-socketio: WebSocket client for real-time server communication
+        - requests: HTTP client for API communication
         - pyperclip: Clipboard operations for text insertion
         - pyautogui: Cross-platform GUI automation for paste simulation
         - numpy: Audio buffer manipulation and WAV data processing
@@ -31,16 +32,18 @@ Dependencies:
 Role in Codebase:
     This is the primary client-side entry point for desktop users. It is
     instantiated by users running the LocalFlow desktop agent and communicates
-    with the LocalFlow server (Node.js/Socket.IO) to process voice dictation.
-    The agent handles: hotkey detection, audio capture, server communication,
-    and automatic text insertion at the cursor position.
+    with the hosted LocalFlow API to process voice dictation. The agent handles:
+    hotkey detection, audio capture, API communication, and automatic text
+    insertion at the cursor position.
 
 Usage:
     python localflow-agent.py
 
 Configuration:
     Set environment variables in .env file or modify the CONFIG section.
-    Key settings include LOCALFLOW_WS_URL, LOCALFLOW_HOTKEY, and LOCALFLOW_MODE.
+    Key settings include LOCALFLOW_API_URL, LOCALFLOW_HOTKEY, and GROQ_API_KEY.
+    On first run, the agent will prompt for a Groq API key and save it to
+    ~/.localflow/config.json.
 
 Example:
     $ python localflow-agent.py
@@ -81,9 +84,6 @@ import requests
 # Global hotkey
 from pynput import keyboard
 
-# WebSocket client
-import socketio
-
 # Visual feedback overlay
 from recording_overlay import RecordingOverlay
 
@@ -107,8 +107,9 @@ class Config:
         - os.getenv: Environment variable retrieval with default fallbacks
 
     Attributes:
-        websocket_url: The WebSocket server endpoint URL that the agent
-            connects to for audio processing and transcription services.
+        api_url: The API server URL that the agent sends audio to for
+            transcription and refinement services.
+        api_key: The user's Groq API key for BYOK cloud transcription.
         sample_rate: Audio sampling rate in Hz. 16000 is Whisper.cpp's
             native rate for optimal transcription quality.
         channels: Number of audio channels. Mono (1) is sufficient for
@@ -123,21 +124,19 @@ class Config:
             raw, outline) that determines how the LLM refines the text.
         processing_mode: Where processing occurs - "cloud", "networked-local",
             or "local" depending on infrastructure deployment.
-        heartbeat_interval: Seconds between keepalive pings to maintain
-            WebSocket connection and detect network issues.
         paste_cooldown: Minimum seconds between paste operations to
             prevent accidental rapid-fire text insertion.
 
     Example:
         >>> config = Config()
-        >>> print(config.websocket_url)
-        'http://localhost:3002'
+        >>> print(config.api_url)
+        'https://dictate.agentmemorylabs.com'
         >>> print(config.sample_rate)
         16000
     """
 
-    websocket_url: str = os.getenv("LOCALFLOW_WS_URL", "http://localhost:3002")
-    api_url: str = os.getenv("LOCALFLOW_API_URL", "http://localhost:3000")
+    api_url: str = os.getenv("LOCALFLOW_API_URL", "https://dictate.agentmemorylabs.com")
+    api_key: str = os.getenv("GROQ_API_KEY") or os.getenv("LOCALFLOW_API_KEY") or ""
     sample_rate: int = 16000  # Whisper.cpp native rate
     channels: int = 1  # Mono
     dtype: str = "int16"  # 16-bit PCM
@@ -152,12 +151,77 @@ class Config:
     )  # developer, concise, professional, raw, outline
     selection_format_default_target: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_DEFAULT_TARGET", "markdown")
     selection_formatter_enabled: bool = os.getenv("LOCALFLOW_SELECTION_FORMAT_ENABLED", "true").lower() == "true"
-    processing_mode: str = os.getenv("PROCESSING_MODE", "networked-local")  # cloud, networked-local, local
-    heartbeat_interval: int = 5
+    processing_mode: str = os.getenv("PROCESSING_MODE", "cloud")  # cloud, networked-local, local
     paste_cooldown: float = 0.1
 
 
 CONFIG = Config()
+
+# Config file path for persistent settings
+CONFIG_DIR = Path.home() / ".localflow"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def _load_config_file() -> dict:
+    """Load persistent config from ~/.localflow/config.json if it exists."""
+    if CONFIG_FILE.exists():
+        try:
+            import json
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            log_warning(f"Failed to load config file: {e}")
+    return {}
+
+
+def _save_config_file(data: dict) -> None:
+    """Save persistent config to ~/.localflow/config.json."""
+    try:
+        import json
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        log_warning(f"Failed to save config file: {e}")
+
+
+def _ensure_api_key() -> str:
+    """Ensure the agent has a Groq API key. Prompts interactively if missing.
+
+    Checks environment variables and config file. If no key is found,
+    prompts the user to enter one and saves it to the config file.
+    """
+    # Check env vars first
+    key = os.getenv("GROQ_API_KEY") or os.getenv("LOCALFLOW_API_KEY") or ""
+    if key:
+        return key
+
+    # Check config file
+    cfg = _load_config_file()
+    key = cfg.get("api_key", "")
+    if key:
+        return key
+
+    # Prompt user interactively
+    print("\n" + "=" * 60)
+    print("LocalFlow requires a Groq API key for cloud transcription.")
+    print("Get your free API key at: https://console.groq.com/keys")
+    print("=" * 60 + "\n")
+    try:
+        key = input("Enter your Groq API key: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n")
+        sys.exit(1)
+
+    if not key:
+        print("No API key provided. Exiting.")
+        sys.exit(1)
+
+    # Save to config file
+    cfg["api_key"] = key
+    _save_config_file(cfg)
+    print(f"\nAPI key saved to {CONFIG_FILE}")
+    return key
 
 
 # ============================================
@@ -731,17 +795,16 @@ class LocalFlowAgent:
     The LocalFlowAgent is the central controller that manages the entire
     dictation workflow. It coordinates between the AudioRecorder for
     capture, PasteHandler for text insertion, RecordingOverlay for
-    visual feedback, and Socket.IO client for server communication.
+    visual feedback, and the hosted API for transcription and refinement.
 
     This class implements the core state machine for recording sessions,
-    handles WebSocket connection management with automatic reconnection,
-    and processes server responses to trigger text insertion.
+    sends audio via HTTP POST to the hosted API, and processes responses
+    to trigger text insertion.
 
     Key Technologies/APIs:
-        - socketio.Client: WebSocket client with automatic reconnection,
-          namespace support (/agent), and event-based message handling
+        - requests.post: HTTP communication with the hosted API
         - pynput.keyboard: Global hotkey registration across all apps
-        - threading.Thread: Background heartbeat and overlay threads
+        - threading.Thread: Background overlay threads
         - base64.b64encode: Audio data encoding for JSON transmission
         - time.time: Millisecond timestamps for server synchronization
 
@@ -749,8 +812,7 @@ class LocalFlowAgent:
         recorder: AudioRecorder instance for audio capture.
         paste_handler: PasteHandler instance for text insertion.
         overlay: RecordingOverlay instance for visual feedback.
-        sio: socketio.Client for WebSocket communication.
-        connected: Boolean WebSocket connection state.
+        api_key: User's Groq API key for BYOK cloud transcription.
         mode: Current processing mode (developer, concise, etc.).
         processing_mode: Where processing occurs (cloud, local, etc.).
         hotkey: Current global hotkey configuration string.
@@ -762,8 +824,6 @@ class LocalFlowAgent:
 
     Example:
         >>> agent = LocalFlowAgent()
-        >>> agent.connect()
-        True
         >>> agent.run()  # Blocks until interrupted
     """
 
@@ -771,15 +831,8 @@ class LocalFlowAgent:
         """Initialize the LocalFlowAgent and all subcomponents.
 
         Creates instances of all required components (AudioRecorder,
-        PasteHandler, RecordingOverlay) and configures the Socket.IO
-        client with reconnection parameters. Sets up event handlers
-        for the /agent namespace.
-
-        Key Technologies/APIs:
-            - socketio.Client: WebSocket client initialization with
-              reconnection=True, infinite reconnection_attempts=0,
-              reconnection_delay/reconnection_delay_max for backoff
-            - Event handler registration via @sio.on decorator
+        PasteHandler, RecordingOverlay). The agent communicates with
+        the hosted API via HTTP POST instead of WebSocket.
 
         Returns:
             None
@@ -787,13 +840,7 @@ class LocalFlowAgent:
         self.recorder = AudioRecorder()
         self.paste_handler = PasteHandler(self)  # Pass agent reference for keyboard flag
         self.overlay = RecordingOverlay()  # Visual feedback overlay
-        self.sio = socketio.Client(
-            reconnection=True,
-            reconnection_attempts=0,  # Infinite
-            reconnection_delay=1,
-            reconnection_delay_max=5,
-        )
-        self.connected = False
+        self.api_key = CONFIG.api_key
         self.mode = CONFIG.mode
         self.processing_mode = CONFIG.processing_mode
         self.hotkey = CONFIG.hotkey
@@ -811,204 +858,103 @@ class LocalFlowAgent:
         self.agent_mode_active = False  # True when using Alt+A voice agent mode
         self.pasting_in_progress = False  # Flag to prevent keyboard listener interference
 
-        # Set up Socket.IO event handlers
-        self._setup_socket_handlers()
+    def _get_transcribe_endpoint(self) -> str:
+        return f"{CONFIG.api_url.rstrip('/')}/api/dictation/transcribe"
 
-    def _setup_socket_handlers(self) -> None:
-        """Configure Socket.IO event handlers for the /agent namespace.
+    def _transcribe_audio(self, audio_base64: str, translate: bool = False) -> dict:
+        """Send audio to the transcription API and return the result.
 
-        Registers all server event handlers including connection lifecycle
-        events (connect, disconnect, connect_error), server confirmations,
-        transcription results (dictation_result), and configuration updates
-        (settings_update). Each handler updates the appropriate agent state
-        and triggers UI or text insertion actions.
+        POSTs base64-encoded audio to the hosted transcribe endpoint
+        with the user's API key for BYOK cloud transcription.
 
-        Key Technologies/APIs:
-            - socketio.Client.on decorator: Event handler registration
-              with namespace="/agent" for scoped events
-            - Event handlers: on_connect, on_disconnect, on_connect_error,
-              on_connection_confirmed, on_dictation_result, on_settings_update
+        Args:
+            audio_base64: Base64-encoded WAV audio data.
+            translate: Whether to translate non-English audio to English.
 
         Returns:
-            None
-
-        Note:
-            Handlers are registered as nested functions to capture self
-            reference and access agent state directly.
-        """
-
-        @self.sio.on("connect", namespace="/agent")
-        def on_connect():
-            self.connected = True
-            log_info(f"Connected to WebSocket server: {CONFIG.websocket_url}")
-
-        @self.sio.on("disconnect", namespace="/agent")
-        def on_disconnect():
-            self.connected = False
-            log_info("Disconnected from WebSocket server")
-
-        @self.sio.on("connect_error", namespace="/agent")
-        def on_connect_error(error):
-            log_error(f"Connection error: {error}")
-
-        @self.sio.on("connection_confirmed", namespace="/agent")
-        def on_connection_confirmed(data):
-            log_info(f"Connection confirmed, server time: {data.get('serverTime')}")
-
-        @self.sio.on("dictation_result", namespace="/agent")
-        def on_dictation_result(data):
-            """Handle transcription result from server.
-
-            Processes the server's dictation_result event containing the
-            transcribed and refined text. Extracts the refined text, word
-            count, and processing time from the response, then triggers
-            paste_text() to insert at the cursor position.
-
-            Key Technologies/APIs:
-                - dict.get: Safe dictionary access for optional fields
-                - paste_handler.paste_text: Final text insertion
-
-            Args:
-                data: Dictionary containing server response with keys:
-                    - success (bool): Whether transcription succeeded
-                    - refinedText (str): The processed text to insert
-                    - wordCount (int): Number of words transcribed
-                    - processingTime (int): Server processing time in ms
-                    - error (str): Error message if success is False
-            """
-            if data.get("success"):
-                refined_text = data.get("refinedText", "")
-                word_count = data.get("wordCount", 0)
-                processing_time = data.get("processingTime", 0)
-
-                log_info(f"Received result: {word_count} words, {processing_time}ms")
-                log_info(f"Text to paste: '{refined_text}'")
-
-                # Paste the refined text
-                if refined_text:
-                    self.paste_handler.paste_text(refined_text)
-                else:
-                    log_warning("Refined text is empty, skipping paste")
-            else:
-                error = data.get("error", "Unknown error")
-                log_error(f"Dictation failed: {error}")
-
-        @self.sio.on("settings_update", namespace="/agent")
-        def on_settings_update(data):
-            """Handle settings update from server.
-
-            Updates agent configuration based on server-sent settings
-            changes. Supports updating mode, processingMode, and hotkey
-            configurations dynamically without restart.
-
-            Key Technologies/APIs:
-                - dict.get: Safe access to optional update fields
-                - log_info: Confirmation logging of applied changes
-
-            Args:
-                data: Dictionary containing settings to update:
-                    - mode (str): New processing mode
-                    - processingMode (str): New processing location
-                    - hotkey (str): New hotkey configuration
-            """
-            if "mode" in data:
-                self.mode = data["mode"]
-                log_info(f"Mode updated: {self.mode}")
-
-            if "processingMode" in data:
-                self.processing_mode = data["processingMode"]
-                log_info(f"Processing mode updated: {self.processing_mode}")
-
-            if "hotkey" in data:
-                self.hotkey = data["hotkey"]
-                log_info(f"Hotkey updated: {self.hotkey}")
-
-            if "formatHotkey" in data:
-                self.format_hotkey = data["formatHotkey"]
-                log_info(f"Format hotkey updated: {self.format_hotkey}")
-
-            if "translateHotkey" in data:
-                self.translate_hotkey = data["translateHotkey"]
-                log_info(f"Translate hotkey updated: {self.translate_hotkey}")
-
-            if "cleanupHotkey" in data:
-                self.cleanup_hotkey = data["cleanupHotkey"]
-                log_info(f"Cleanup hotkey updated: {self.cleanup_hotkey}")
-
-            if "selectionFormatHotkey" in data:
-                self.selection_format_hotkey = self._normalize_selection_hotkey(data["selectionFormatHotkey"])
-                log_info(f"Selection format hotkey updated: {self.selection_format_hotkey}")
-
-            if "selectionFormatDefaultTarget" in data:
-                self.selection_format_default_target = data["selectionFormatDefaultTarget"]
-                log_info(f"Selection format target updated: {self.selection_format_default_target}")
-
-            if "selectionFormatterEnabled" in data:
-                self.selection_formatter_enabled = bool(data["selectionFormatterEnabled"])
-                log_info(f"Selection formatter enabled: {self.selection_formatter_enabled}")
-
-    def connect(self) -> bool:
-        """Establish WebSocket connection to the LocalFlow server.
-
-        Attempts to connect to the configured WebSocket server with
-        multiple transport fallbacks (polling, websocket) and a 10-second
-        timeout. Sets up the /agent namespace for scoped communication.
-
-        Key Technologies/APIs:
-            - socketio.Client.connect: WebSocket connection with
-              namespaces, wait_timeout, and transports parameters
-            - Exception handling for connection failures
-            - traceback.print_exc: Debug output for connection errors
-
-        Returns:
-            bool: True if connection succeeded, False if connection
-                failed or timed out.
-
-        Raises:
-            No exceptions are raised; all errors are caught and logged.
+            dict: API response with keys success, text, wordCount, mode, processingTime.
         """
         try:
-            log_info(f"Connecting to {CONFIG.websocket_url}/agent...")
-            self.sio.connect(
-                CONFIG.websocket_url,
-                namespaces=["/agent"],
-                wait_timeout=10,
-                transports=["polling", "websocket"],
+            response = requests.post(
+                self._get_transcribe_endpoint(),
+                json={
+                    "audio": audio_base64,
+                    "mode": self.processing_mode,
+                    "translate": translate,
+                    "apiKey": self.api_key,
+                },
+                timeout=60,
+                headers={"Content-Type": "application/json"},
             )
-            return True
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.Timeout:
+            log_error("Transcription request timed out (60s)")
+            return {"success": False, "error": "Transcription timed out"}
+        except requests.exceptions.ConnectionError as e:
+            log_error(f"Failed to connect to transcription API: {e}")
+            return {"success": False, "error": f"Connection failed: {e}"}
         except Exception as e:
-            log_error(f"Failed to connect: {e}")
-            import traceback  # DEBUG
-            traceback.print_exc()  # DEBUG
-            return False
+            log_error(f"Transcription request failed: {e}")
+            return {"success": False, "error": str(e)}
 
-    def _send_heartbeat(self) -> None:
-        """Send periodic heartbeat pings to maintain WebSocket connection.
+    def _refine_text(self, text: str, mode: str, translate: bool = False) -> dict:
+        """Send text to the refinement API and return the result.
 
-        Runs in a background thread, sending ping events to the server
-        at regular intervals (CONFIG.heartbeat_interval). This keeps
-        the connection alive through proxies/firewalls and enables early
-        detection of network issues.
-
-        Key Technologies/APIs:
-            - socketio.Client.emit: Send ping events on /agent namespace
-            - time.sleep: Interval waiting between heartbeats
-            - Exception handling for network errors during emit
+        Args:
+            text: The raw transcribed text to refine.
+            mode: The refinement mode (developer, concise, professional, outline, cleanup).
+            translate: Whether the text was translated.
 
         Returns:
-            None: This method runs indefinitely until self.running is False.
-
-        Note:
-            This method is designed to run in a daemon thread. It should
-            be started via threading.Thread(target=self._send_heartbeat).
+            dict: API response with keys success, refinedText, etc.
         """
-        while self.running:
-            if self.connected:
-                try:
-                    self.sio.emit("ping", namespace="/agent")
-                except Exception as e:
-                    log_debug(f"Heartbeat error: {e}")
-            time.sleep(CONFIG.heartbeat_interval)
+        try:
+            response = requests.post(
+                self._get_refine_endpoint(),
+                json={
+                    "text": text,
+                    "mode": mode,
+                    "processingMode": self.processing_mode,
+                    "translated": translate,
+                },
+                timeout=45,
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.Timeout:
+            log_error("Refinement request timed out (45s)")
+            return {"success": False, "error": "Refinement timed out"}
+        except Exception as e:
+            log_error(f"Refinement request failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _agent_query(self, text: str) -> dict:
+        """Send text to the voice agent API and return the answer.
+
+        Args:
+            text: The transcribed question text.
+
+        Returns:
+            dict: API response with keys success, answer, etc.
+        """
+        try:
+            endpoint = f"{CONFIG.api_url.rstrip('/')}/api/agent/query"
+            response = requests.post(
+                endpoint,
+                json={"text": text},
+                timeout=45,
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.Timeout:
+            log_error("Agent query timed out (45s)")
+            return {"success": False, "error": "Agent query timed out"}
+        except Exception as e:
+            log_error(f"Agent query failed: {e}")
+            return {"success": False, "error": str(e)}
 
     def toggle_translation(self) -> None:
         """Toggle translation mode on/off with visual feedback.
@@ -1043,19 +989,14 @@ class LocalFlowAgent:
     def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False) -> None:
         """Initiate audio recording session.
 
-        Starts the AudioRecorder, displays the visual overlay, and
-        notifies the server that recording has begun. Sets the mode
-        flags (format/translate) which determine how the server
-        processes the transcription.
-
-        Key Technologies/APIs:
-            - AudioRecorder.start: Sounddevice stream initialization
-            - RecordingOverlay.show: GUI feedback activation
-            - socketio.Client.emit: Server notification
+        Starts the AudioRecorder and displays the visual overlay.
+        Sets the mode flags (format/translate) which determine how
+        the transcription is processed.
 
         Args:
             format_mode: If True, uses LLM formatting/outline mode.
             translate_mode: If True, uses translation mode.
+            agent_mode: If True, uses voice agent Q&A mode.
 
         Returns:
             None
@@ -1084,28 +1025,12 @@ class LocalFlowAgent:
             if translate_mode:
                 log_info("Translation mode activated (Alt+T)")
 
-            # Notify server
-            if self.connected:
-                try:
-                    self.sio.emit(
-                        "recording_started",
-                        {
-                            "timestamp": int(time.time() * 1000), 
-                            "format_mode": format_mode,
-                            "translate_mode": translate_mode,
-                        },
-                        namespace="/agent",
-                    )
-                except Exception as e:
-                    log_debug(f"Failed to notify recording start: {e}")
-
     def _stop_recording(self) -> None:
-        """Stop recording and transmit audio to server for processing.
+        """Stop recording and process audio via the hosted API.
 
         Halts the audio recorder, hides the visual overlay, encodes
-        the captured audio as base64, and sends it to the server via
-        the process_audio event. Determines the effective processing
-        mode and translation settings.
+        the captured audio as base64, and sends it to the hosted API
+        for transcription and optional refinement.
         """
         # Hide visual feedback
         self.overlay.hide()
@@ -1119,31 +1044,64 @@ class LocalFlowAgent:
             effective_mode = "outline"
         else:
             effective_mode = self.mode
-        
-        if audio_bytes:
-            # Convert to base64
-            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
 
-            # Send to server
-            if self.connected:
-                try:
-                    self.sio.emit(
-                        "process_audio",
-                        {
-                            "type": "process_audio",
-                            "audio": audio_base64,
-                            "mode": effective_mode,
-                            "processingMode": self.processing_mode,
-                            "translate": self.translate_mode_active,
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        namespace="/agent",
-                    )
-                    log_info(f"Audio sent ({'Translate' if self.translate_mode_active else 'Normal'})")
-                except Exception as e:
-                    log_error(f"Failed to send audio: {e}")
+        if not audio_bytes:
+            log_warning("No audio captured")
+            self.format_mode_active = False
+            self.translate_mode_active = False
+            self.agent_mode_active = False
+            return
+
+        # Convert to base64
+        audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        log_info(f"Audio captured ({'Translate' if self.translate_mode_active else 'Normal'}), sending to API...")
+
+        # Step 1: Transcribe
+        transcribe_result = self._transcribe_audio(audio_base64, self.translate_mode_active)
+
+        if not transcribe_result.get("success"):
+            error = transcribe_result.get("error") or transcribe_result.get("details") or "Transcription failed"
+            log_error(f"Transcription failed: {error}")
+            self.overlay.show_status("Transcription failed", bg_color="#7a2e2e")
+            self.format_mode_active = False
+            self.translate_mode_active = False
+            self.agent_mode_active = False
+            return
+
+        raw_text = transcribe_result.get("text", "")
+        word_count = transcribe_result.get("wordCount", 0)
+        processing_time = transcribe_result.get("processingTime", 0)
+        log_info(f"Transcribed: {word_count} words, {processing_time}ms")
+
+        # Step 2: Refine or Agent query (skip for raw mode)
+        final_text = raw_text
+
+        if effective_mode == "agent":
+            log_info("Sending to voice agent...")
+            agent_result = self._agent_query(raw_text)
+            if agent_result.get("success"):
+                final_text = agent_result.get("answer", "")
+                log_info(f"Agent answer: {len(final_text)} chars")
             else:
-                log_error("Not connected to server")
+                error = agent_result.get("error") or "Agent query failed"
+                log_error(f"Agent query failed: {error}")
+                self.overlay.show_status("Agent failed", bg_color="#7a2e2e")
+        elif effective_mode != "raw":
+            refine_result = self._refine_text(raw_text, effective_mode, self.translate_mode_active)
+            if refine_result.get("success"):
+                final_text = refine_result.get("refinedText", raw_text)
+                log_info(f"Refined text: {len(final_text)} chars")
+            else:
+                error = refine_result.get("error") or refine_result.get("details") or "Refinement failed"
+                log_warning(f"Refinement failed, using raw text: {error}")
+                final_text = raw_text
+
+        # Paste the result
+        if final_text:
+            self.paste_handler.paste_text(final_text)
+        else:
+            log_warning("Final text is empty, skipping paste")
 
         # Reset flags
         self.format_mode_active = False
@@ -1548,21 +1506,12 @@ class LocalFlowAgent:
         """Execute the main agent event loop.
 
         The primary entry point for agent operation. Displays startup
-        information, establishes the WebSocket connection, starts the
-        heartbeat thread for connection maintenance, and configures
-        global hotkey listeners. Then enters the main loop waiting
-        for keyboard interrupts or shutdown signals.
+        information, ensures API key is configured, and sets up global
+        hotkey listeners. Then enters the main loop waiting for keyboard
+        interrupts or shutdown signals.
 
         This method blocks until the agent is stopped via Ctrl+C or
         other interruption mechanism.
-
-        Key Technologies/APIs:
-            - threading.Thread: Background heartbeat thread with
-              daemon=True for automatic cleanup
-            - time.sleep: Event loop throttling (100ms intervals)
-            - KeyboardInterrupt handling: Graceful shutdown on Ctrl+C
-            - Listener.stop(): Hotkey listener cleanup
-            - socketio.Client.disconnect: Clean WebSocket teardown
 
         Returns:
             None: This method blocks indefinitely during operation.
@@ -1570,17 +1519,15 @@ class LocalFlowAgent:
         Raises:
             No exceptions are raised; KeyboardInterrupt is caught
             for graceful shutdown.
-
-        Example:
-            >>> agent = LocalFlowAgent()
-            >>> agent.run()  # Blocks here, press Ctrl+C to exit
-            [INFO] LocalFlow Desktop Agent
-            [INFO] Listening for hotkey: alt+l
-            ^C[INFO] Shutting down...
         """
+        # Ensure API key is available
+        if not self.api_key:
+            self.api_key = _ensure_api_key()
+
         log_info("=" * 60)
         log_info("LocalFlow Desktop Agent")
         log_info("=" * 60)
+        log_info(f"API: {CONFIG.api_url}")
         log_info(f"Hotkey (raw): {self.hotkey}")
         log_info(f"Hotkey (format): {self.format_hotkey}")
         log_info(f"Hotkey (translate): {self.translate_hotkey}")
@@ -1589,14 +1536,6 @@ class LocalFlowAgent:
         log_info(f"Mode: {self.mode}")
         log_info(f"Processing: {self.processing_mode}")
         log_info("=" * 60)
-
-        # Connect to server
-        if not self.connect():
-            log_error("Failed to connect to server. Retrying in background...")
-
-        # Start heartbeat thread
-        heartbeat_thread = threading.Thread(target=self._send_heartbeat, daemon=True)
-        heartbeat_thread.start()
 
         # Set up hotkey listener
         listener = self._setup_hotkey_listener()
@@ -1613,8 +1552,6 @@ class LocalFlowAgent:
         finally:
             self.running = False
             listener.stop()
-            if self.connected:
-                self.sio.disconnect()
             log_info("Agent stopped")
 
 
@@ -1678,9 +1615,9 @@ def check_dependencies() -> None:
         missing.append("pynput")
 
     try:
-        import socketio
+        import requests
     except ImportError:
-        missing.append("python-socketio")
+        missing.append("requests")
 
     if missing:
         print("Missing dependencies:")
