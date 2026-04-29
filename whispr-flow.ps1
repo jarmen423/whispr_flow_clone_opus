@@ -60,20 +60,135 @@ if ($IsWindows -or ($env:OS -match "Windows")) {
 
 if ($stop) {
     Write-Host "Stopping LocalFlow services..." -ForegroundColor Yellow
-    
-    # Stop Node.js processes (Next.js and WebSocket service)
-    Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force
-    
-    # Stop Python agent processes
-    Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { 
-        $_.CommandLine -like "*localflow-agent*" 
-    } | Stop-Process -Force
-    
-    # Also try python3 on Linux/macOS
-    Get-Process -Name "python3" -ErrorAction SilentlyContinue | Where-Object { 
-        $_.CommandLine -like "*localflow-agent*" 
-    } | Stop-Process -Force
-    
+
+    function Stop-LocalFlowProcess {
+        <#
+        .SYNOPSIS
+        Stops one LocalFlow-owned process and keeps shutdown best-effort.
+
+        .DESCRIPTION
+        LocalFlow runs as several child processes, but Windows machines often
+        also have unrelated node.exe processes in service sessions. This helper
+        stops only a caller-selected PID and converts permission failures into
+        warnings so `whispr-flow -stop` does not fail while touching unrelated
+        elevated services.
+
+        .PARAMETER ProcessId
+        Windows process ID to stop.
+
+        .PARAMETER Reason
+        Short operator-facing explanation of why this PID was selected.
+        #>
+        param(
+            [Parameter(Mandatory = $true)]
+            [int]$ProcessId,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Reason
+        )
+
+        try {
+            $Process = Get-Process -Id $ProcessId -ErrorAction Stop
+            Write-Host "  Stopping $($Process.ProcessName) ($ProcessId) - $Reason" -ForegroundColor Gray
+            Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+        } catch {
+            $Message = $_.Exception.Message
+            Write-Warning "Could not stop PID $ProcessId ($Reason): $Message"
+
+            if ($Message -like "*Access is denied*") {
+                Write-Warning "PID $ProcessId is probably running from an elevated/admin session. Run whispr-flow -stop from Administrator PowerShell or close the elevated LocalFlow window."
+            }
+        }
+    }
+
+    function Stop-LocalFlowPortListeners {
+        <#
+        .SYNOPSIS
+        Stops processes listening on LocalFlow's development ports.
+
+        .DESCRIPTION
+        The local stack exposes the Next.js app on port 3000 and the Socket.IO
+        bridge on port 3002. Matching by port is more precise than killing all
+        Node.js processes and still works when the command line is hidden from a
+        non-elevated PowerShell session.
+
+        .PARAMETER Ports
+        TCP ports that belong to the LocalFlow development stack.
+        #>
+        param(
+            [Parameter(Mandatory = $true)]
+            [int[]]$Ports
+        )
+
+        $NetstatOutput = cmd /c "netstat -ano -p tcp" 2>$null
+
+        foreach ($Port in $Ports) {
+            $MatchingLines = $NetstatOutput |
+                Select-String ":$Port\s" |
+                Select-String "LISTENING"
+
+            foreach ($Line in $MatchingLines) {
+                $ProcessIdText = ($Line.ToString().Trim() -split '\s+')[-1]
+                if ($ProcessIdText -match '^\d+$' -and $ProcessIdText -ne '0') {
+                    Stop-LocalFlowProcess -ProcessId ([int]$ProcessIdText) -Reason "listener on port $Port"
+                }
+            }
+        }
+    }
+
+    function Stop-LocalFlowCommandProcesses {
+        <#
+        .SYNOPSIS
+        Stops LocalFlow processes that can be identified by command line.
+
+        .DESCRIPTION
+        Some LocalFlow processes do not have stable ports, especially the Python
+        desktop agent. CIM exposes command lines for normal user-session
+        processes, allowing this script to target project-owned Node/Bun/Python
+        work without touching unrelated developer tools or Windows services.
+
+        .PARAMETER ProjectRoot
+        Absolute LocalFlow repository path used to recognize project-owned
+        command lines.
+        #>
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$ProjectRoot
+        )
+
+        $ProcessQuery = "name = 'node.exe' or name = 'bun.exe' or name = 'python.exe' or name = 'python3.exe'"
+        $KnownFragments = @(
+            $ProjectRoot,
+            "localflow-agent.py",
+            "mini-services\websocket-service",
+            "mini-services/websocket-service",
+            "scripts\dev.js",
+            "scripts/dev.js"
+        )
+
+        Get-CimInstance Win32_Process -Filter $ProcessQuery -ErrorAction SilentlyContinue |
+            Where-Object {
+                $CommandLine = $_.CommandLine
+                if (-not $CommandLine) {
+                    return $false
+                }
+
+                foreach ($Fragment in $KnownFragments) {
+                    if ($CommandLine.IndexOf($Fragment, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                        return $true
+                    }
+                }
+
+                return $false
+            } |
+            ForEach-Object {
+                Stop-LocalFlowProcess -ProcessId ([int]$_.ProcessId) -Reason "LocalFlow command line"
+            }
+    }
+
+    Stop-LocalFlowPortListeners -Ports @(3000, 3002)
+    Stop-LocalFlowCommandProcesses -ProjectRoot $ProjectRoot
+
     Write-Host "Stopped!" -ForegroundColor Red
 } elseif ($formatSelection) {
     Write-Host "Formatting selected text with LocalFlow..." -ForegroundColor Cyan

@@ -68,3 +68,7 @@ export async function isAuthenticated(): Promise<boolean> {
   const user = await getCurrentUser();
   return user !== null;
 }
+
+export function loginWithGoogle(): void {
+  window.location.href = "/api/auth/google";
+}

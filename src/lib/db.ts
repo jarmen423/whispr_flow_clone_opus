@@ -149,6 +149,10 @@ function migrateSqlite(db: DatabaseType) {
     CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id);
     CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at);
     CREATE INDEX IF NOT EXISTS idx_installs_created ON install_events(created_at);
+
+    -- OAuth migration: add google_id column if not exists
+    ALTER TABLE users ADD COLUMN google_id TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
   `);
 }
 
@@ -161,6 +165,10 @@ export async function runMigrations() {
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_user ON download_events(user_id)");
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_downloads_created ON download_events(created_at)");
     await sqlClient.query("CREATE INDEX IF NOT EXISTS idx_installs_created ON install_events(created_at)");
+
+    // OAuth migration: add google_id column if not exists
+    await sqlClient.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT");
+    await sqlClient.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)");
   }
 }
 

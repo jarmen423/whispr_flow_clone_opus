@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login } from "@/lib/auth";
+import { GoogleSignInButton } from "@/components/google-sign-in-button";
 import { toast } from "sonner";
 
 function LoginForm() {
@@ -20,6 +21,20 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Show OAuth errors from query params
+  useEffect(() => {
+    const error = searchParams.get("error");
+    if (error) {
+      const messages: Record<string, string> = {
+        access_denied: "Google sign-in was cancelled.",
+        invalid_state: "Invalid request. Please try again.",
+        oauth_failed: "Google sign-in failed. Please try again.",
+        oauth_not_configured: "Google OAuth is not configured.",
+      };
+      toast.error(messages[error] || "Something went wrong with Google sign-in.");
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +76,17 @@ function LoginForm() {
             <p className="text-sm text-muted-foreground">
               Log in to access your dictation dashboard.
             </p>
+          </div>
+
+          <GoogleSignInButton label="Sign in with Google" />
+
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">or</span>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
