@@ -123,8 +123,8 @@ export default function SetupPage() {
 
   const installCommand =
     platform === "windows"
-      ? 'irm https://dictate.agentmemorylabs.com/api/download?script=install-cli.ps1 | iex'
-      : 'curl -fsSL https://dictate.agentmemorylabs.com/api/download?script=install-cli.sh | bash';
+      ? 'irm https://dictate.agentmemorylabs.com/api/download?platform=windows | iex'
+      : 'curl -fsSL https://dictate.agentmemorylabs.com/api/download?platform=linux | bash';
 
   const steps = [
     {

@@ -359,25 +359,23 @@ Start-Sleep -Seconds 2
 
 # --- Service 2: Python LocalFlow Agent ---
 Write-ColoredOutput "[3/$TotalSteps] Starting Python LocalFlow Agent..." -Color Yellow
-Write-ColoredOutput "      Activating venv: .venv-whispr" -Color Gray
-Write-ColoredOutput "      Script: localflow-agent.py" -Color Gray
+Write-ColoredOutput "      Command: localflow-agent (uv tool)" -Color Gray
 
 <#
-    Construct and launch Python agent command.
-    
-    Commands executed:
-    1. cd to agent directory
-    2. Activate virtual environment
-    3. Run localflow-agent.py
-    4. Read-Host to keep window open
-    
-    The virtual environment activation ensures the agent has access
-    to all required Python packages (pynput, sounddevice, etc.)
+    Construct and launch the agent. We call the uv-installed `localflow-agent`
+    console script directly — no venv activation, no cd. Falls back to
+    `uv run` from the project root for a fresh checkout.
 #>
-$PythonVenvPath = Join-Path $ProjectRoot "agent\.venv-whispr\Scripts\Activate.ps1"
-$PythonScriptPath = Join-Path $ProjectRoot "agent\localflow-agent.py"
+if (Get-Command localflow-agent -ErrorAction SilentlyContinue) {
+    $AgentCmd = "localflow-agent"
+} elseif (Get-Command uv -ErrorAction SilentlyContinue) {
+    $AgentCmd = "uv run --project `"$ProjectRoot`" localflow-agent"
+} else {
+    Write-ColoredOutput "ERROR: localflow-agent not found. Install with: uv tool install --editable `"$ProjectRoot`"" -Color Red
+    exit 1
+}
 
-$PythonCommand = "cd `"$ProjectRoot\agent`"; & `"$PythonVenvPath`"; python `"$PythonScriptPath`"; Read-Host 'Press Enter to close'"
+$PythonCommand = "$AgentCmd; Read-Host 'Press Enter to close'"
 Start-Process wt -ArgumentList "new-tab", "--title", "LocalFlow - Python Agent", "pwsh", "-NoExit", "-Command", $PythonCommand
 
 Start-Sleep -Seconds 2

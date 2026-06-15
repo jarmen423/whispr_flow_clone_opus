@@ -5,12 +5,16 @@
 
 .DESCRIPTION
     Installs the LocalFlow desktop agent with global hotkey support.
-    Automatically clones the repository, sets up a Python virtual environment,
-    installs dependencies, and creates a launcher.
+    Clones the repository and installs the agent as a uv-managed tool, which
+    provides the `localflow-agent` and `localflow-recover` console commands.
+    Also creates Start Menu shortcuts for both.
+
+    Requires uv (https://astral.sh/uv). If uv is missing it is installed
+    automatically.
 
 .EXAMPLE
     # Run directly from the web:
-    # irm https://your-site.com/api/download?platform=windows | iex
+    # irm https://dictate.agentmemorylabs.com/api/download?platform=windows | iex
 
     # Or run locally:
     .\install-agent.ps1
@@ -21,11 +25,9 @@ $ErrorActionPreference = "Stop"
 # Configuration
 $RepoUrl = "https://github.com/jarmen423/whispr_flow_clone_opus.git"
 $InstallDir = "$env:USERPROFILE\.localflow\localflow"
-$BinDir = "$env:USERPROFILE\.local\bin"
-$VenvDir = "$InstallDir\agent\.venv-whispr"
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
-function Write-Ok($msg)  { Write-Host "   ✓ $msg" -ForegroundColor Green }
+function Write-Ok($msg)  { Write-Host "   + $msg" -ForegroundColor Green }
 function Write-Warn($msg){ Write-Host "   ! $msg" -ForegroundColor Yellow }
 
 Write-Host ""
@@ -33,25 +35,6 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  LocalFlow Desktop Agent Installer" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-
-# --- Check Python ---
-Write-Step "Checking for Python..."
-$PythonCmd = $null
-foreach ($cmd in @("python", "python3", "py")) {
-    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
-        $PythonCmd = $cmd
-        break
-    }
-}
-if (-not $PythonCmd) {
-    Write-Host "ERROR: Python is not installed or not in PATH." -ForegroundColor Red
-    Write-Host "Please install Python 3.8+ from https://python.org/downloads/"
-    Write-Host "Make sure to check 'Add Python to PATH' during installation."
-    exit 1
-}
-
-$PyVersion = & $PythonCmd --version 2>&1
-Write-Ok "Found $PyVersion"
 
 # --- Check Git ---
 Write-Step "Checking for Git..."
@@ -61,6 +44,31 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     exit 1
 }
 Write-Ok "Found Git"
+
+# --- Ensure uv is installed ---
+Write-Step "Checking for uv..."
+$UvCmd = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $UvCmd) {
+    Write-Warn "uv not found. Installing uv..."
+    try {
+        $installScript = (Invoke-WebRequest -Uri "https://astral.sh/uv/install.ps1" -UseBasicParsing -TimeoutSec 30).Content
+        & powershell -ExecutionPolicy Bypass -Command $installScript
+        # Refresh PATH for this session so `uv` resolves immediately.
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+        $UvCmd = Get-Command uv -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "ERROR: Could not install uv automatically." -ForegroundColor Red
+        Write-Host "Please install uv manually: https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
+    }
+}
+if (-not $UvCmd) {
+    Write-Host "ERROR: uv is still not on PATH. Open a new terminal and re-run, or install manually:" -ForegroundColor Red
+    Write-Host "  https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
+}
+$UvVersion = & uv --version 2>&1
+Write-Ok "Found $UvVersion"
 
 # --- Clone or update repo ---
 Write-Step "Downloading LocalFlow agent..."
@@ -73,74 +81,54 @@ if (Test-Path $InstallDir) {
     New-Item -ItemType Directory -Path (Split-Path $InstallDir) -Force | Out-Null
     git clone --depth 1 $RepoUrl $InstallDir --quiet
 }
+Set-Location $InstallDir
 Write-Ok "Agent files ready at $InstallDir"
 
-# --- Create virtual environment ---
-Write-Step "Setting up Python environment..."
-if (Test-Path $VenvDir) {
-    Write-Warn "Virtual environment already exists, reusing..."
-} else {
-    & $PythonCmd -m venv $VenvDir
-}
-Write-Ok "Virtual environment created"
+# --- Install the agent as a uv tool (editable so `git pull` updates it) ---
+Write-Step "Installing agent via uv (this may take a minute on first run)..."
+uv tool install --editable --force .
+Write-Ok "Agent installed"
 
-# --- Install dependencies ---
-Write-Step "Installing dependencies (this may take a minute)..."
-$Pip = "$VenvDir\Scripts\pip.exe"
-& $Pip install --quiet --upgrade pip
-& $Pip install --quiet -r "$InstallDir\agent\requirements.txt"
-Write-Ok "Dependencies installed"
-
-# --- Create launcher script ---
-Write-Step "Creating launcher..."
-if (-not (Test-Path $BinDir)) {
-    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+# Refresh PATH so the new console scripts resolve in this session.
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -and ($UserPath -notlike "*$env:USERPROFILE\.local\bin*")) {
+    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$env:USERPROFILE\.local\bin", "User")
+    $env:Path = "$env:Path;$env:USERPROFILE\.local\bin"
 }
 
-$LauncherContent = @"
-# LocalFlow Desktop Agent Launcher
-# Auto-generated by install-agent.ps1
-
-`$AgentDir = "$InstallDir\agent"
-`$VenvActivate = "`$AgentDir\.venv-whispr\Scripts\Activate.ps1"
-
-Set-Location `$AgentDir
-& `$VenvActivate
-python localflow-agent.py
-"@
-
-$LauncherPath = "$BinDir\localflow-agent.ps1"
-Set-Content -Path $LauncherPath -Value $LauncherContent -Force
-
-# Create .cmd wrapper so user can type 'localflow-agent' without 'powershell'
-$CmdWrapper = @"
-@echo off
-powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\.local\bin\localflow-agent.ps1" %*
-"@
-Set-Content -Path "$BinDir\localflow-agent.cmd" -Value $CmdWrapper -Force
-
-# Add to PATH if not already present
-`$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (`$UserPath -notlike "*`$BinDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "`$UserPath;`$BinDir", "User")
-    Write-Warn "Added `$BinDir to your PATH. Restart your terminal to use 'localflow-agent' command."
+# Locate the uv-installed console scripts so the shortcuts point at them.
+$AgentExe = (Get-Command localflow-agent -ErrorAction SilentlyContinue).Source
+$RecoverExe = (Get-Command localflow-recover -ErrorAction SilentlyContinue).Source
+if (-not $AgentExe) {
+    # Fall back to the uv bin directory directly.
+    $UvBin = & uv tool dir 2>$null
+    if ($UvBin) { $AgentExe = Join-Path $UvBin "localflow-agent.exe" }
 }
-Write-Ok "Launcher created at $LauncherPath"
+Write-Ok "Console command: localflow-agent"
+Write-Ok "Console command: localflow-recover"
 
-# --- Create Start Menu shortcut ---
-Write-Step "Creating Start Menu shortcut..."
+# --- Create Start Menu shortcuts ---
+Write-Step "Creating Start Menu shortcuts..."
 $WshShell = New-Object -ComObject WScript.Shell
 $StartMenuDir = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\LocalFlow"
 if (-not (Test-Path $StartMenuDir)) {
     New-Item -ItemType Directory -Path $StartMenuDir -Force | Out-Null
 }
-$Shortcut = $WshShell.CreateShortcut("$StartMenuDir\LocalFlow Agent.lnk")
-$Shortcut.TargetPath = "powershell.exe"
-$Shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$LauncherPath`""
-$Shortcut.WorkingDirectory = "$InstallDir\agent"
-$Shortcut.IconLocation = "powershell.exe,0"
-$Shortcut.Save()
-Write-Ok "Start Menu shortcut created"
+
+if ($AgentExe -and (Test-Path $AgentExe)) {
+    $Shortcut = $WshShell.CreateShortcut("$StartMenuDir\LocalFlow Agent.lnk")
+    $Shortcut.TargetPath = $AgentExe
+    $Shortcut.WorkingDirectory = "$env:USERPROFILE"
+    $Shortcut.Save()
+}
+
+if ($RecoverExe -and (Test-Path $RecoverExe)) {
+    $RecoverShortcut = $WshShell.CreateShortcut("$StartMenuDir\LocalFlow Recovery.lnk")
+    $RecoverShortcut.TargetPath = $RecoverExe
+    $RecoverShortcut.WorkingDirectory = "$env:USERPROFILE"
+    $RecoverShortcut.Save()
+}
+Write-Ok "Start Menu shortcuts created"
 
 # --- Anonymous install ping (no PII, fails silently) ---
 try {
@@ -157,8 +145,6 @@ Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Start the agent:"
 Write-Host "  localflow-agent           (after restarting terminal)" -ForegroundColor Cyan
-Write-Host "  powershell $LauncherPath  (right now)" -ForegroundColor Cyan
-Write-Host ""
 Write-Host "Or find it in your Start Menu: LocalFlow > LocalFlow Agent" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Hotkeys (hold to record, release to paste):"
@@ -169,8 +155,15 @@ Write-Host "  Alt+J  - Format selected text" -ForegroundColor Gray
 Write-Host "  Alt+N  - Cleanup selected text" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Failed transcription recovery:"
-Write-Host "  Saved failed recordings: $env:USERPROFILE\.localflow\failed-recordings" -ForegroundColor Gray
+Write-Host "  Open the Recovery Console:  localflow-recover" -ForegroundColor Cyan
+Write-Host "    (or Start Menu: LocalFlow > LocalFlow Recovery)" -ForegroundColor Gray
+Write-Host "  List saved recordings:      localflow-agent --list-failed-recordings" -ForegroundColor Gray
+Write-Host "  Retry the newest:           localflow-agent --retry-latest-failed" -ForegroundColor Gray
+Write-Host "  Saved recordings folder:    $env:USERPROFILE\.localflow\failed-recordings" -ForegroundColor Gray
 Write-Host "  Default retention: 72 hours" -ForegroundColor Gray
 Write-Host ""
-Write-Warn "The hosted API is used by default. On first run, enter your Groq API key if prompted."
+Write-Host "Updates:"
+Write-Host "  cd $InstallDir ; git pull ; uv tool install --editable --force ." -ForegroundColor Gray
+Write-Host ""
+Write-Warn "On first run, enter your Groq API key if prompted."
 Write-Host ""

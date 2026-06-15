@@ -33,19 +33,23 @@ if (Test-Path (Join-Path $ScriptDir "package.json")) {
 }
 
 # Binaries - use .cmd wrappers (most reliable on Windows without bun)
-$VenvPython   = "$ProjectRoot\agent\.venv-whispr\Scripts\python.exe"
 $Concurrently = "$ProjectRoot\node_modules\.bin\concurrently.cmd"
 $Next         = "$ProjectRoot\node_modules\.bin\next.cmd"
 $SucraseNode  = "$ProjectRoot\node_modules\.bin\sucrase-node.cmd"
 $WsService    = "$ProjectRoot\mini-services\websocket-service\index.ts"
-$Agent        = "$ProjectRoot\agent\localflow-agent.py"
 
-# Validate
-if (-not (Test-Path $VenvPython)) {
-    Write-Error "Python venv not found: $VenvPython"
-    Write-Error "Run: cd '$ProjectRoot\agent' && python -m venv .venv-whispr && pip install -r requirements.txt"
+# Resolve the agent command: prefer the uv-installed console script, fall back
+# to `uv run` from the project root for a fresh checkout.
+if (Get-Command localflow-agent -ErrorAction SilentlyContinue) {
+    $AgentCmd = "localflow-agent"
+} elseif (Get-Command uv -ErrorAction SilentlyContinue) {
+    $AgentCmd = "uv run --project `"$ProjectRoot`" localflow-agent"
+} else {
+    Write-Error "localflow-agent not found. Install with: uv tool install --editable `"$ProjectRoot`""
     exit 1
 }
+
+# Validate
 if (-not (Test-Path $Concurrently)) {
     Write-Error "concurrently not found. Run: npm install"
     exit 1
@@ -85,4 +89,4 @@ Set-Location $ProjectRoot
     "--kill-others" `
     "$Next dev -p 3000" `
     "$SucraseNode `"$WsService`"" `
-    "`"$VenvPython`" -u `"$Agent`""
+    "$AgentCmd"

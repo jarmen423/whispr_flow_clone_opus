@@ -14,24 +14,12 @@ A fast, private, AI-powered dictation system with dual-mode hotkey support.
 
 Normal users do not need to run the legacy local web stack. The desktop agent records audio, sends it to the hosted API at `https://dictate.agentmemorylabs.com`, and uses your Groq API key for BYOK transcription.
 
-### Windows
+The installer clones the repo and installs the agent as a [uv](https://docs.astral.sh/uv/)-managed tool. uv is installed automatically if missing. This provides the `localflow-agent` and `localflow-recover` console commands and a Start Menu / applications entry.
 
-Run the installer again. If LocalFlow is already installed at `~/.localflow/localflow`, the script updates that checkout with `git pull`, refreshes dependencies, and keeps your saved `~/.localflow/config.json`.
+### Windows
 
 ```powershell
 irm https://dictate.agentmemorylabs.com/api/download?platform=windows | iex
-```
-
-Then start the agent:
-
-```powershell
-localflow-agent
-```
-
-If your current terminal does not know that command yet:
-
-```powershell
-powershell $env:USERPROFILE\.local\bin\localflow-agent.ps1
 ```
 
 ### macOS / Linux
@@ -48,6 +36,12 @@ Then start the agent:
 localflow-agent
 ```
 
+To **update** later: re-run the installer (it does `git pull` + reinstalls), or from the checkout:
+
+```bash
+cd ~/.localflow/localflow && git pull && uv tool install --editable --force .
+```
+
 The agent reads the Groq key from `GROQ_API_KEY`, `LOCALFLOW_API_KEY`, or `~/.localflow/config.json`. On first run it prompts for the key and saves it.
 
 ---
@@ -62,18 +56,10 @@ Use this when you are changing the Next.js app, API routes, or local development
 # Install Node dependencies
 npm install
 
-# Setup Python virtual environment for the agent
-cd agent
-python -m venv .venv-whispr
-
-# Activate venv (Windows)
-.venv-whispr\Scripts\activate
-# Activate venv (Linux/macOS)
-source .venv-whispr/bin/activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-cd ..
+# Install the agent as an editable uv tool (creates localflow-agent + localflow-recover)
+uv tool install --editable .
+# If you don't have uv yet: irm https://astral.sh/uv/install.ps1 | iex  (Windows)
+#                          curl -LsSf https://astral.sh/uv/install.sh | sh  (macOS/Linux)
 ```
 
 ### Step 2: Install CLI (Recommended)
@@ -117,15 +103,15 @@ Release to transcribe and auto-paste.
 
 ### Alternative: Manual Start (No CLI Install)
 
-If you prefer not to install the CLI command:
+If you prefer not to install the `localflow` dev CLI command:
 
 ```bash
 # Terminal 1: Start web services
-cd agent && source .venv-whispr/bin/activate && cd ..
 npm run dev:all
 
-# Terminal 2: Start desktop agent
-cd agent && source .venv-whispr/bin/activate && python localflow-agent.py
+# Terminal 2: Start desktop agent (uses the uv-installed console command)
+localflow-agent
+```
 ```
 
 See [scripts/README.md](scripts/README.md) for more details.
@@ -284,7 +270,7 @@ MIT
 → Ensure microphone is default input device
 
 **"localflow: command not found"**
-→ The CLI isn't installed or your PATH wasn't updated. Run the install script again and restart your terminal:
+→ The dev CLI isn't installed or your PATH wasn't updated. Run the install script again and restart your terminal:
 ```bash
 # Windows
 .\scripts\install-cli.ps1
@@ -292,6 +278,13 @@ MIT
 # Linux/macOS
 ./scripts/install-cli.sh
 ```
+
+**"localflow-agent: command not found"**
+→ The desktop agent isn't installed as a uv tool. Install or reinstall it from the repo root:
+```bash
+uv tool install --editable --force .
+```
+If `uv` itself is missing, install it first: `irm https://astral.sh/uv/install.ps1 | iex` (Windows) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux), then re-run the installer.
 
 **"Could not find LocalFlow project directory"**
 → If you moved the project folder after installing the CLI, set the `LOCALFLOW_HOME` environment variable:

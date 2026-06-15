@@ -55,13 +55,42 @@ import os
 import sys
 import argparse
 import json
+import webbrowser
 from pathlib import Path
+from typing import Optional
 
-# Load .env from project root (parent of agent directory)
+# Load .env from a layered set of locations so it works both from a source
+# checkout and after `uv tool install` (where __file__ lives in site-packages).
+# Resolution order:
+#   1. LOCALFLOW_ENV_FILE (explicit override)
+#   2. ~/.localflow/.env (user config dir, alongside config.json)
+#   3. ./.env (cwd — dev convenience when run from a repo root)
+#   4. <repo-root>/.env (only when running from a source checkout)
 from dotenv import load_dotenv
 
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
+
+def _resolve_env_path() -> Optional[Path]:
+    candidates = []
+    explicit = os.getenv("LOCALFLOW_ENV_FILE")
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    candidates.append(Path.home() / ".localflow" / ".env")
+    candidates.append(Path.cwd() / ".env")
+    # Source-checkout fallback: agent/localflow_agent/__init__.py -> repo root
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if (repo_root / "agent" / "localflow_agent" / "__init__.py").exists():
+        candidates.append(repo_root / ".env")
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+env_path = _resolve_env_path()
+if env_path:
     load_dotenv(env_path)
     print(f"[Config] Loaded environment from {env_path}")
 import time
@@ -69,7 +98,6 @@ import base64
 import io
 import threading
 import queue
-from typing import Optional
 from dataclasses import dataclass
 
 # Audio processing
@@ -86,7 +114,7 @@ import requests
 from pynput import keyboard
 
 # Visual feedback overlay
-from recording_overlay import RecordingOverlay
+from .recording_overlay import RecordingOverlay
 
 # ============================================
 # CONFIGURATION
@@ -1005,7 +1033,9 @@ class LocalFlowAgent:
 
         The sidecar avoids storing secrets or request bodies. It exists to make
         manual recovery easy: users can see when the recording happened, what
-        mode was active, and why the agent kept the WAV file.
+        mode was active, and why the agent kept the WAV file. It also records
+        the exact CLI commands to recover so users and future agents don't need
+        to remember the docs.
         """
         metadata = {
             "status": status,
@@ -1015,6 +1045,8 @@ class LocalFlowAgent:
             "processing_mode": self.processing_mode,
             "translate": translate,
             "retention_hours": self.failed_recordings_retention_hours,
+            "recovery_command": "localflow-agent --recover",
+            "retry_command": f'localflow-agent --retry-failed-recording "{recording_path}"',
         }
         if error:
             metadata["error"] = error
@@ -1079,6 +1111,339 @@ class LocalFlowAgent:
             self._unlink_if_exists(recording_path.with_suffix(".json"))
         except Exception as e:
             log_warning(f"Failed to discard successful recording recovery file {recording_path}: {e}")
+
+    # ------------------------------------------------------------------
+    # Failed-recording recovery (CLI-driven, local-first)
+    # ------------------------------------------------------------------
+
+    def _enumerate_failed_recordings(self) -> list:
+        """List retained failed recordings newest-first.
+
+        Each entry is a dict with keys: ``path`` (Path), ``sidecar`` (dict or
+        None), ``mtime`` (float), ``age_hours`` (float), ``recovered`` (bool),
+        ``mode``, ``translate``, ``status``, ``error``. Corrupt or missing
+        sidecars do not raise: the entry is returned with ``sidecar=None`` so
+        the WAV is still surfaced for manual retry.
+        """
+        if not self.failed_recordings_dir.exists():
+            return []
+
+        entries: list = []
+        now = time.time()
+        for path in self.failed_recordings_dir.glob("localflow-failed-*.wav"):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError as e:
+                log_warning(f"Failed to stat failed recording {path}: {e}")
+                continue
+
+            sidecar_path = path.with_suffix(".json")
+            sidecar = None
+            if sidecar_path.exists():
+                try:
+                    with open(sidecar_path, "r", encoding="utf-8") as f:
+                        sidecar = json.load(f)
+                except (OSError, ValueError) as e:
+                    log_warning(f"Could not read sidecar {sidecar_path}: {e}")
+
+            status = (sidecar or {}).get("status", "failed")
+            entries.append(
+                {
+                    "path": path,
+                    "sidecar": sidecar,
+                    "mtime": mtime,
+                    "age_hours": max(0.0, (now - mtime) / 3600.0),
+                    "recovered": status == "recovered",
+                    "mode": (sidecar or {}).get("mode", "unknown"),
+                    "translate": bool((sidecar or {}).get("translate", False)),
+                    "status": status,
+                    "error": (sidecar or {}).get("error"),
+                }
+            )
+
+        entries.sort(key=lambda e: e["mtime"], reverse=True)
+        return entries
+
+    def _read_sidecar(self, wav_path: Path) -> dict:
+        """Read the JSON sidecar for a WAV path, raising FileNotFoundError if absent."""
+        sidecar_path = wav_path.with_suffix(".json")
+        if not sidecar_path.exists():
+            raise FileNotFoundError(f"No sidecar JSON next to {wav_path.name}")
+        with open(sidecar_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _retry_failed_recording(
+        self,
+        wav_path: Path,
+        paste: bool = False,
+        replay_agent: bool = False,
+    ) -> dict:
+        """Retry transcription (and optional refinement) for a retained WAV.
+
+        Reads the sidecar for the original ``mode``/``translate``, re-encodes
+        the WAV, and runs the shared ``process_audio_bytes`` pipeline. On
+        success the recovered text is copied to the clipboard (or pasted with
+        ``paste=True``), saved as a sibling ``.txt`` transcript, and the
+        sidecar is marked ``recovered``. On failure the WAV is retained and
+        the sidecar records the retry error.
+
+        Returns a dict with ``success``, ``text``, ``error``, ``wav_path``.
+        """
+        wav_path = Path(wav_path).expanduser()
+        if not wav_path.exists():
+            return {"success": False, "error": f"Recording not found: {wav_path}", "wav_path": wav_path}
+
+        try:
+            sidecar = self._read_sidecar(wav_path)
+        except (FileNotFoundError, ValueError) as e:
+            return {"success": False, "error": str(e), "wav_path": wav_path}
+
+        mode = sidecar.get("mode", "raw")
+        translate = bool(sidecar.get("translate", False))
+
+        # agent-mode retry is transcribe-only unless explicitly opted in
+        run_agent_query = bool(replay_agent) and mode == "agent"
+
+        try:
+            with open(wav_path, "rb") as f:
+                audio_bytes = f.read()
+        except OSError as e:
+            return {"success": False, "error": f"Could not read audio file: {e}", "wav_path": wav_path}
+
+        result = self.process_audio_bytes(audio_bytes, mode, translate, run_agent_query=run_agent_query)
+
+        if not result["success"]:
+            self._record_retry_outcome(wav_path, sidecar, success=False, error=result.get("error"))
+            return {"success": False, "error": result.get("error"), "wav_path": wav_path}
+
+        final_text = result["text"]
+
+        # Persist a sibling transcript for durability
+        transcript_path = wav_path.with_suffix(".txt")
+        try:
+            with open(transcript_path, "w", encoding="utf-8") as f:
+                f.write(final_text)
+        except OSError as e:
+            log_warning(f"Could not write recovered transcript {transcript_path}: {e}")
+
+        # Deliver the text: clipboard by default, paste only when requested
+        if paste:
+            self.paste_handler.paste_text(final_text)
+        else:
+            try:
+                pyperclip.copy(final_text)
+            except Exception as e:
+                log_warning(f"Could not copy recovered text to clipboard: {e}")
+
+        self._record_retry_outcome(
+            wav_path,
+            sidecar,
+            success=True,
+            transcript_path=transcript_path,
+            replayed_agent=run_agent_query,
+        )
+
+        return {
+            "success": True,
+            "text": final_text,
+            "raw_text": result.get("raw_text", ""),
+            "wav_path": wav_path,
+            "transcript_path": transcript_path,
+            "agent_query_replayed": run_agent_query,
+        }
+
+    def _record_retry_outcome(
+        self,
+        wav_path: Path,
+        sidecar: dict,
+        success: bool,
+        error: Optional[str] = None,
+        transcript_path: Optional[Path] = None,
+        replayed_agent: bool = False,
+    ) -> None:
+        """Update the sidecar in place with the outcome of a retry attempt."""
+        sidecar.update(
+            {
+                "retry_result": "recovered" if success else "failed",
+                "retried_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "agent_query_replayed": replayed_agent,
+            }
+        )
+        if success:
+            sidecar["status"] = "recovered"
+            if transcript_path is not None:
+                sidecar["recovered_text_file"] = transcript_path.name
+        if error:
+            sidecar["retry_error"] = error
+
+        try:
+            with open(wav_path.with_suffix(".json"), "w", encoding="utf-8") as f:
+                json.dump(sidecar, f, indent=2)
+        except OSError as e:
+            log_warning(f"Could not update sidecar after retry: {e}")
+
+    def _retry_latest_failed(self, paste: bool = False, replay_agent: bool = False) -> dict:
+        """Retry the newest not-yet-recovered failed recording.
+
+        Returns the ``_retry_failed_recording`` result, or a failure dict with
+        ``error="no recordings"`` when nothing is eligible.
+        """
+        for entry in self._enumerate_failed_recordings():
+            if entry["recovered"]:
+                continue
+            return self._retry_failed_recording(entry["path"], paste=paste, replay_agent=replay_agent)
+        return {"success": False, "error": "No unrecovered failed recordings to retry"}
+
+    def _generate_recovery_html(self) -> Path:
+        """Write a self-contained ``recovery.html`` dashboard into the recovery dir.
+
+        The page lists every retained recording with status, mode, age, error
+        summary, file:// links to the WAV/sidecar/transcript, and a copyable
+        retry command. It uses inlined CSS only: no external assets, no web
+        server, no tracking.
+        """
+        import html as html_module
+
+        entries = self._enumerate_failed_recordings()
+        recoverable = [e for e in entries if not e["recovered"]]
+        recovered = [e for e in entries if e["recovered"]]
+
+        def _format_age(hours: float) -> str:
+            if hours < 1:
+                return f"{int(hours * 60)}m ago"
+            if hours < 24:
+                return f"{hours:.1f}h ago"
+            return f"{hours / 24:.1f}d ago"
+
+        def _row_html(e: dict) -> str:
+            wav = e["path"]
+            sidecar_path = wav.with_suffix(".json")
+            transcript_path = wav.with_suffix(".txt")
+            status = e["status"]
+            mode = e["mode"] or "unknown"
+            badge_class = "badge badge-recovered" if e["recovered"] else "badge badge-pending"
+            retry_cmd = f'localflow-agent --retry-failed-recording "{wav}"'
+            transcript_link = ""
+            if transcript_path.exists():
+                transcript_link = (
+                    f'<a class="link" href="file:///{html_module.escape(str(transcript_path).replace(os.sep, "/"))}">transcript</a>'
+                )
+            error_html = ""
+            if e["error"]:
+                error_html = (
+                    f'<div class="error">Error: {html_module.escape(str(e["error"]))}</div>'
+                )
+            agent_note = ""
+            if mode == "agent" and not e["recovered"]:
+                agent_note = '<div class="note">Agent mode retries transcribe only by default. Add --retry-agent-query to replay the web-search answer.</div>'
+            return f"""
+            <div class="row {"recovered-row" if e["recovered"] else ""}">
+              <div class="row-head">
+                <span class="{badge_class}">{html_module.escape(status)}</span>
+                <span class="mode">{html_module.escape(mode)}</span>
+                <span class="age">{html_module.escape(_format_age(e["age_hours"]))}</span>
+                {("<span class='translated'>translated</span>") if e["translate"] else ""}
+              </div>
+              <div class="filename">{html_module.escape(wav.name)}</div>
+              {error_html}
+              {agent_note}
+              <div class="links">
+                <a class="link" href="file:///{html_module.escape(str(wav).replace(os.sep, "/"))}">audio</a>
+                <a class="link" href="file:///{html_module.escape(str(sidecar_path).replace(os.sep, "/"))}">metadata</a>
+                {transcript_link}
+              </div>
+              {"<!-- recovered -->" if e["recovered"] else f'<div class="cmd" title="Click to copy"><code>{html_module.escape(retry_cmd)}</code></div>'}
+            </div>"""
+
+        rows_html = "\n".join(_row_html(e) for e in entries) if entries else '<p class="empty">No retained recordings. Saved audio is discarded automatically once transcription succeeds.</p>'
+
+        recovery_dir = self.failed_recordings_dir
+        html_path = recovery_dir / "recovery.html"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        document = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalFlow Recovery Console</title>
+<style>
+  :root {{
+    --bg: #0f1117; --panel: #1a1d27; --panel-2: #222634; --text: #e6e8ef;
+    --muted: #9aa0b4; --accent: #5b9dff; --green: #3fb950; --amber: #d29922;
+    --red: #f85149; --border: #2c3142;
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px clamp(16px, 5vw, 48px);
+  }}
+  header h1 {{ margin: 0 0 4px; font-size: 22px; }}
+  header .sub {{ color: var(--muted); margin-bottom: 16px; }}
+  .stats {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }}
+  .stat {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; min-width: 120px; }}
+  .stat .n {{ font-size: 22px; font-weight: 600; }}
+  .stat .l {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }}
+  .privacy {{ background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; color: var(--muted); margin: 16px 0 24px; font-size: 13px; }}
+  .row {{ background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }}
+  .recovered-row {{ opacity: .65; }}
+  .row-head {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }}
+  .badge {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; }}
+  .badge-pending {{ background: rgba(210,153,34,.15); color: var(--amber); }}
+  .badge-recovered {{ background: rgba(63,185,80,.15); color: var(--green); }}
+  .mode {{ background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; font-size: 12px; color: var(--text); }}
+  .age, .translated {{ color: var(--muted); font-size: 12px; }}
+  .filename {{ font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--muted); word-break: break-all; margin-bottom: 6px; }}
+  .error {{ color: var(--red); font-size: 13px; margin: 4px 0; }}
+  .note {{ color: var(--muted); font-size: 12px; margin: 4px 0; }}
+  .links {{ display: flex; gap: 14px; margin-top: 8px; }}
+  .link {{ color: var(--accent); text-decoration: none; font-size: 13px; }}
+  .link:hover {{ text-decoration: underline; }}
+  .cmd {{ margin-top: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; cursor: pointer; }}
+  .cmd code {{ font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text); word-break: break-all; }}
+  .empty {{ color: var(--muted); }}
+  footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
+</style>
+</head>
+<body>
+  <header>
+    <h1>LocalFlow Recovery Console</h1>
+    <div class="sub">Saved dictation audio lives here until it is recovered or the retention window expires.</div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="n">{len(recoverable)}</div><div class="l">Recoverable</div></div>
+    <div class="stat"><div class="n">{len(recovered)}</div><div class="l">Recovered</div></div>
+    <div class="stat"><div class="n">{self.failed_recordings_retention_hours:g}h</div><div class="l">Retention</div></div>
+  </div>
+
+  <div class="privacy">
+    Local-first: audio stays on your disk. Running a retry command uploads only that single file to your configured transcription endpoint. Nothing here is sent anywhere until you choose to retry.
+  </div>
+
+  {rows_html}
+
+  <footer>Generated {html_module.escape(now_str)} &middot; {html_module.escape(str(recovery_dir))}</footer>
+
+  <script>
+    document.querySelectorAll('.cmd').forEach(function(el){{
+      el.addEventListener('click', function(){{
+        var text = el.innerText.trim();
+        navigator.clipboard.writeText(text).then(function(){{
+          el.style.borderColor = '#3fb950';
+          setTimeout(function(){{ el.style.borderColor = ''; }}, 800);
+        }});
+      }});
+    }});
+  </script>
+</body>
+</html>
+"""
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(document)
+        return html_path
 
     def _get_transcribe_endpoint(self) -> str:
         return f"{CONFIG.api_url.rstrip('/')}/api/dictation/transcribe"
@@ -1280,16 +1645,17 @@ class LocalFlowAgent:
             self.translate_mode_active,
         )
 
-        # Convert to base64
-        audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-
         log_info(f"Audio captured ({'Translate' if self.translate_mode_active else 'Normal'}), sending to API...")
 
-        # Step 1: Transcribe
-        transcribe_result = self._transcribe_audio(audio_base64, self.translate_mode_active)
+        result = self.process_audio_bytes(
+            audio_bytes,
+            effective_mode,
+            self.translate_mode_active,
+            run_agent_query=True,
+        )
 
-        if not transcribe_result.get("success"):
-            error = transcribe_result.get("error") or transcribe_result.get("details") or "Transcription failed"
+        if not result["success"]:
+            error = result.get("error") or "Transcription failed"
             log_error(f"Transcription failed: {error}")
             self._retain_failed_recording(
                 failed_recording_path,
@@ -1297,7 +1663,10 @@ class LocalFlowAgent:
                 self.translate_mode_active,
                 error,
             )
-            self.overlay.show_status("Transcription failed", bg_color="#7a2e2e")
+            self.overlay.show_status("Saved for recovery", bg_color="#24486b")
+            if failed_recording_path:
+                log_info(f"Recording saved for recovery: {failed_recording_path}")
+                log_info("Recover with: localflow-agent --recover")
             self.format_mode_active = False
             self.translate_mode_active = False
             self.agent_mode_active = False
@@ -1305,35 +1674,13 @@ class LocalFlowAgent:
 
         self._discard_failed_recording_candidate(failed_recording_path)
 
-        raw_text = transcribe_result.get("text", "")
-        word_count = transcribe_result.get("wordCount", 0)
-        processing_time = transcribe_result.get("processingTime", 0)
-        log_info(f"Transcribed: {word_count} words, {processing_time}ms")
-
-        # Step 2: Refine or Agent query (skip for raw mode)
-        final_text = raw_text
-
-        if effective_mode == "agent":
-            log_info("Sending to voice agent...")
-            agent_result = self._agent_query(raw_text)
-            if agent_result.get("success"):
-                final_text = agent_result.get("answer", "")
-                log_info(f"Agent answer: {len(final_text)} chars")
-            else:
-                error = agent_result.get("error") or "Agent query failed"
-                log_error(f"Agent query failed: {error}")
-                self.overlay.show_status("Agent failed", bg_color="#7a2e2e")
-        elif effective_mode != "raw":
-            refine_result = self._refine_text(raw_text, effective_mode, self.translate_mode_active)
-            if refine_result.get("success"):
-                final_text = refine_result.get("refinedText", raw_text)
-                log_info(f"Refined text: {len(final_text)} chars")
-            else:
-                error = refine_result.get("error") or refine_result.get("details") or "Refinement failed"
-                log_warning(f"Refinement failed, using raw text: {error}")
-                final_text = raw_text
+        if result.get("agent_failed"):
+            self.overlay.show_status("Agent failed", bg_color="#7a2e2e")
+        elif result.get("refine_failed"):
+            log_warning("Refinement failed, using raw text")
 
         # Paste the result
+        final_text = result["text"]
         if final_text:
             self.paste_handler.paste_text(final_text)
         else:
@@ -1343,6 +1690,104 @@ class LocalFlowAgent:
         self.format_mode_active = False
         self.translate_mode_active = False
         self.agent_mode_active = False
+
+    def process_audio_bytes(
+        self,
+        audio_bytes: bytes,
+        mode: str,
+        translate: bool,
+        run_agent_query: bool = True,
+    ) -> dict:
+        """Transcribe WAV bytes and run the mode-appropriate post-processing.
+
+        This is the shared pipeline used by both the live recording flow
+        (``_stop_recording``) and the failed-recording retry CLI. It performs
+        base64 encoding, transcription, and the agent/refine/raw dispatch, but
+        deliberately avoids side effects on the overlay, paste handler, or the
+        failed-recording lifecycle so callers can compose it freely.
+
+        Args:
+            audio_bytes: Raw WAV file bytes.
+            mode: Effective mode (``agent``, ``raw``, ``outline``,
+                ``developer``, etc.).
+            translate: Whether translation was requested.
+            run_agent_query: When True (the live default) agent-mode audio also
+                runs the voice-agent query. When False (the retry default)
+                agent-mode audio is transcribed only, leaving the web-search
+                replay as an explicit opt-in.
+
+        Returns:
+            dict with keys: ``success`` (bool), ``text`` (final text),
+            ``raw_text`` (transcript before refinement), ``error`` (str|None),
+            ``stage`` ("transcribe"|"agent"|"refine"|"done"), ``word_count``,
+            ``processing_time``, ``agent_failed`` (bool), ``refine_failed`` (bool).
+        """
+        audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        # Step 1: Transcribe
+        transcribe_result = self._transcribe_audio(audio_base64, translate)
+
+        if not transcribe_result.get("success"):
+            error = transcribe_result.get("error") or transcribe_result.get("details") or "Transcription failed"
+            return {
+                "success": False,
+                "text": "",
+                "raw_text": "",
+                "error": error,
+                "stage": "transcribe",
+                "word_count": 0,
+                "processing_time": 0,
+                "agent_failed": False,
+                "refine_failed": False,
+            }
+
+        raw_text = transcribe_result.get("text", "")
+        word_count = transcribe_result.get("wordCount", 0)
+        processing_time = transcribe_result.get("processingTime", 0)
+        log_info(f"Transcribed: {word_count} words, {processing_time}ms")
+
+        # Step 2: Refine or Agent query (skip for raw mode)
+        final_text = raw_text
+        agent_failed = False
+        refine_failed = False
+        stage = "done"
+
+        if mode == "agent":
+            if run_agent_query:
+                log_info("Sending to voice agent...")
+                agent_result = self._agent_query(raw_text)
+                if agent_result.get("success"):
+                    final_text = agent_result.get("answer", "")
+                    log_info(f"Agent answer: {len(final_text)} chars")
+                else:
+                    error = agent_result.get("error") or "Agent query failed"
+                    log_error(f"Agent query failed: {error}")
+                    final_text = raw_text
+                    agent_failed = True
+            else:
+                log_info("Agent-mode retry: transcribing only (use --retry-agent-query to replay the web-search answer)")
+        elif mode != "raw":
+            refine_result = self._refine_text(raw_text, mode, translate)
+            if refine_result.get("success"):
+                final_text = refine_result.get("refinedText", raw_text)
+                log_info(f"Refined text: {len(final_text)} chars")
+            else:
+                error = refine_result.get("error") or refine_result.get("details") or "Refinement failed"
+                log_warning(f"Refinement failed, using raw text: {error}")
+                final_text = raw_text
+                refine_failed = True
+
+        return {
+            "success": True,
+            "text": final_text,
+            "raw_text": raw_text,
+            "error": None,
+            "stage": stage,
+            "word_count": word_count,
+            "processing_time": processing_time,
+            "agent_failed": agent_failed,
+            "refine_failed": refine_failed,
+        }
 
     def _get_refine_endpoint(self) -> str:
         return f"{CONFIG.api_url.rstrip('/')}/api/dictation/refine"
@@ -1874,6 +2319,26 @@ def check_dependencies() -> None:
         sys.exit(1)
 
 
+def _open_in_browser(html_path: Path) -> None:
+    """Open an HTML file in the user's default browser.
+
+    On Windows, ``os.startfile`` is used because it is synchronous (the shell
+    launches the registered handler before returning) and works reliably from a
+    transient child process — ``webbrowser.open`` spawns a detached helper that
+    can be lost if the parent exits quickly. On macOS/Linux we fall back to the
+    standard ``webbrowser`` module.
+    """
+    path_str = str(html_path)
+    try:
+        if sys.platform == "win32":
+            os.startfile(path_str)  # type: ignore[attr-defined]
+        else:
+            webbrowser.open(f"file:///{path_str.replace(os.sep, '/')}")
+    except Exception as e:
+        log_warning(f"Could not open recovery console in browser: {e}")
+        print(f"Open manually: {path_str}")
+
+
 def main() -> None:
     """Application entry point.
 
@@ -1910,9 +2375,72 @@ def main() -> None:
         choices=["markdown", "json", "jsonl", "csv"],
         help="Explicit output target for --format-selection",
     )
+    # Failed-recording recovery (local-first)
+    parser.add_argument(
+        "--recover",
+        action="store_true",
+        help="Generate and open the local Recovery Console (recovery.html) for failed recordings",
+    )
+    parser.add_argument(
+        "--list-failed-recordings",
+        action="store_true",
+        help="Print retained failed recordings newest-first and exit",
+    )
+    parser.add_argument(
+        "--retry-latest-failed",
+        action="store_true",
+        help="Retry transcription of the newest unrecovered failed recording",
+    )
+    parser.add_argument(
+        "--retry-failed-recording",
+        metavar="PATH",
+        help="Retry transcription of a specific failed recording WAV path",
+    )
+    parser.add_argument(
+        "--paste",
+        action="store_true",
+        help="With a retry, paste the recovered text at the cursor instead of copying to the clipboard",
+    )
+    parser.add_argument(
+        "--retry-agent-query",
+        action="store_true",
+        help="When retrying an agent-mode recording, also replay the web-search voice agent query",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="With --recover, generate the console but do not open it in a browser",
+    )
     args = parser.parse_args()
 
     agent = LocalFlowAgent()
+
+    # --- Failed-recording recovery branch (no API key needed for listing/console) ---
+    if args.recover:
+        html_path = agent._generate_recovery_html()
+        print(f"Recovery console written to: {html_path}")
+        if not args.no_open:
+            _open_in_browser(html_path)
+        sys.exit(0)
+
+    if args.list_failed_recordings:
+        _run_list_failed_recordings(agent)
+        sys.exit(0)
+
+    if args.retry_latest_failed or args.retry_failed_recording:
+        # Retries need a Groq key for transcription
+        if not agent.api_key:
+            agent.api_key = _ensure_api_key()
+        if args.retry_failed_recording:
+            result = agent._retry_failed_recording(
+                Path(args.retry_failed_recording),
+                paste=args.paste,
+                replay_agent=args.retry_agent_query,
+            )
+        else:
+            result = agent._retry_latest_failed(paste=args.paste, replay_agent=args.retry_agent_query)
+        _print_retry_result(result)
+        sys.exit(0 if result.get("success") else 1)
 
     if args.format_selection:
         target = args.format_target
@@ -1923,6 +2451,71 @@ def main() -> None:
         sys.exit(0 if agent.format_selected_text(target) else 1)
 
     agent.run()
+
+
+def _format_age_short(hours: float) -> str:
+    """Compact age string for the failed-recordings listing."""
+    if hours < 1:
+        return f"{int(hours * 60)}m"
+    if hours < 24:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
+
+
+def _run_list_failed_recordings(agent: "LocalFlowAgent") -> None:
+    """Print retained failed recordings newest-first to stdout."""
+    entries = agent._enumerate_failed_recordings()
+    if not entries:
+        print("No retained failed recordings.")
+        print(f"Directory: {agent.failed_recordings_dir}")
+        return
+
+    print(f"Retained failed recordings ({len(entries)}):")
+    print(f"Directory: {agent.failed_recordings_dir}")
+    print("-" * 60)
+    for e in entries:
+        status = "RECOVERED" if e["recovered"] else e["status"].upper()
+        translate_tag = " [translated]" if e["translate"] else ""
+        print(f"  {status:10}  {_format_age_short(e['age_hours']):>6} ago  [{e['mode']}]{translate_tag}")
+        print(f"    {e['path']}")
+        if e["error"]:
+            err = e["error"]
+            if len(err) > 120:
+                err = err[:117] + "..."
+            print(f"    error: {err}")
+        if not e["recovered"]:
+            print(f"    retry: localflow-agent --retry-failed-recording \"{e['path']}\"")
+    print("-" * 60)
+
+
+def _print_retry_result(result: dict) -> None:
+    """Pretty-print the outcome of a failed-recording retry."""
+    if result.get("success"):
+        print("Recovery succeeded.")
+        print(f"  Source:    {result.get('wav_path')}")
+        print(f"  Transcript saved to: {result.get('transcript_path')}")
+        if result.get("agent_query_replayed"):
+            print("  Agent web-search query was replayed.")
+        else:
+            print("  Recovered text copied to clipboard. (Agent-mode recordings transcribe only by default.)")
+        text = result.get("text", "")
+        preview = text if len(text) <= 200 else text[:197] + "..."
+        print(f"  Preview:   {preview!r}")
+    else:
+        err = result.get("error") or "Unknown error"
+        print(f"Recovery failed: {err}")
+        if result.get("wav_path"):
+            print(f"  Source: {result.get('wav_path')}")
+
+
+def recover_main() -> None:
+    """Console-script entry point for the ``localflow-recover`` command.
+
+    Equivalent to running ``localflow-agent --recover``. Defined separately so
+    it can be wired up as its own ``[project.scripts]`` entry point.
+    """
+    sys.argv = [sys.argv[0] if sys.argv else "localflow-recover"] + ["--recover"] + sys.argv[1:]
+    main()
 
 
 if __name__ == "__main__":

@@ -1007,9 +1007,9 @@ export default function LocalFlowPage() {
                 Install the desktop agent to use global hotkey dictation in any application
               </p>
               <Button variant="outline" asChild>
-                <a href="/agent/localflow-agent.py" download>
-                  Download Agent
-                </a>
+                <Link href="/download">
+                  Install Agent
+                </Link>
               </Button>
             </CardContent>
           </Card>

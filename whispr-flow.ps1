@@ -12,7 +12,8 @@ param(
     [switch]$formatSelection,
     [switch]$chooseFormat,
     [ValidateSet("markdown", "json", "jsonl", "csv")]
-    [string]$formatTarget = "markdown"
+    [string]$formatTarget = "markdown",
+    [switch]$recover
 )
 
 # Determine project root
@@ -51,12 +52,20 @@ if (Test-Path (Join-Path $ScriptDir "package.json")) {
     }
 }
 
-# Determine virtual environment activation script based on OS
-if ($IsWindows -or ($env:OS -match "Windows")) {
-    $VenvActivate = "$ProjectRoot/agent/.venv-whispr/Scripts/Activate.ps1"
-} else {
-    $VenvActivate = "$ProjectRoot/agent/.venv-whispr/bin/Activate.ps1"
+# Resolve how to invoke the agent. We prefer the uv-installed `localflow-agent`
+# console script; falling back to `uv run` from the project root covers a fresh
+# checkout where the tool hasn't been installed yet.
+function Resolve-AgentCommand {
+    if (Get-Command localflow-agent -ErrorAction SilentlyContinue) {
+        return "localflow-agent"
+    }
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        return "uv run --project '$ProjectRoot' localflow-agent"
+    }
+    Write-Error "localflow-agent not found. Install it with: uv tool install --editable '$ProjectRoot'"
+    exit 1
 }
+$AgentCmd = Resolve-AgentCommand
 
 if ($stop) {
     Write-Host "Stopping LocalFlow services..." -ForegroundColor Yellow
@@ -156,10 +165,11 @@ if ($stop) {
             [string]$ProjectRoot
         )
 
-        $ProcessQuery = "name = 'node.exe' or name = 'bun.exe' or name = 'python.exe' or name = 'python3.exe'"
+        $ProcessQuery = "name = 'node.exe' or name = 'bun.exe' or name = 'python.exe' or name = 'python3.exe' or name = 'localflow-agent.exe'"
         $KnownFragments = @(
             $ProjectRoot,
             "localflow-agent.py",
+            "localflow-agent",
             "mini-services\websocket-service",
             "mini-services/websocket-service",
             "scripts\dev.js",
@@ -193,45 +203,35 @@ if ($stop) {
 } elseif ($formatSelection) {
     Write-Host "Formatting selected text with LocalFlow..." -ForegroundColor Cyan
 
-    if (-not (Test-Path $VenvActivate)) {
-        Write-Error "Virtual environment not found at: $VenvActivate"
-        exit 1
-    }
-
     $formatArgs = @("--format-selection", "--format-target", $formatTarget)
     if ($chooseFormat) {
         $formatArgs += "--choose-format"
     }
 
-    $agentCommand = "cd '$ProjectRoot/agent'; & '$VenvActivate'; python localflow-agent.py $($formatArgs -join ' ')"
-    powershell -Command $agentCommand
+    & powershell -Command "$AgentCmd $($formatArgs -join ' ')"
+} elseif ($recover) {
+    Write-Host "Opening LocalFlow Recovery Console..." -ForegroundColor Cyan
+
+    & powershell -Command "$AgentCmd --recover"
 } else {
     Write-Host "Starting LocalFlow services..." -ForegroundColor Cyan
     Write-Host "Project root: $ProjectRoot" -ForegroundColor Gray
-    
-    # Check if virtual environment exists
-    if (-not (Test-Path $VenvActivate)) {
-        Write-Error "Virtual environment not found at: $VenvActivate"
-        Write-Error "Please run: cd '$ProjectRoot/agent' && python -m venv .venv-whispr && pip install -r requirements.txt"
-        exit 1
-    }
-    
+
     # Check if npm dependencies are installed
     if (-not (Test-Path "$ProjectRoot/node_modules")) {
         Write-Warning "node_modules not found. Running npm install..."
         Set-Location $ProjectRoot
         npm install
     }
-    
+
     # Start Web UI and WebSocket service
     Write-Host "Starting Web UI and WebSocket service..." -ForegroundColor Green
     Start-Process powershell -ArgumentList "-Command", "cd '$ProjectRoot'; npm run dev:all" -WindowStyle Hidden
-    
+
     # Start Desktop Agent
     Write-Host "Starting Desktop Agent..." -ForegroundColor Green
-    $AgentCommand = "cd '$ProjectRoot/agent'; & '$VenvActivate'; python localflow-agent.py"
-    Start-Process powershell -ArgumentList "-Command", $AgentCommand -WindowStyle Hidden
-    
+    Start-Process powershell -ArgumentList "-Command", $AgentCmd -WindowStyle Hidden
+
     Write-Host "Services started!" -ForegroundColor Green
     Write-Host "Press Alt+L for Raw mode, Alt+M for Format mode" -ForegroundColor Cyan
 }

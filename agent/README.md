@@ -4,16 +4,20 @@ The LocalFlow desktop agent enables system-wide dictation with a global hotkey. 
 
 ## Quick Start
 
-### 1. Install Dependencies
+The agent is a Python package installed and managed by [uv](https://docs.astral.sh/uv/). From the repo root:
+
+### 1. Install (editable, picks up `git pull` automatically)
 
 ```bash
-pip install pynput sounddevice scipy python-socketio pyperclip pyautogui numpy
+uv tool install --editable .
 ```
+
+This creates two console commands on your PATH: `localflow-agent` (the agent) and `localflow-recover` (the recovery console). No manual venv, no `pip install`.
 
 ### 2. Run the Agent
 
 ```bash
-python localflow-agent.py
+localflow-agent
 ```
 
 ### 3. Use
@@ -62,7 +66,9 @@ Set these environment variables:
 
 ### Failed Recording Recovery
 
-The agent saves a local recovery copy of each recording before sending it to the transcription API. If transcription succeeds, that temporary copy is deleted immediately. If transcription fails, the WAV remains on disk with a `.json` sidecar that records the active mode, processing backend, translation flag, retention window, and failure message.
+The agent saves a local recovery copy of each recording before sending it to the transcription API. If transcription succeeds, that temporary copy is deleted immediately. If transcription fails, the WAV remains on disk with a `.json` sidecar that records the active mode, processing backend, translation flag, retention window, failure message, and the exact CLI commands to recover it.
+
+On failure the overlay shows **"Saved for recovery"** (blue) instead of an error, and the agent logs the saved WAV path plus `localflow-agent --recover` as the next step.
 
 Default recovery directory:
 
@@ -71,6 +77,40 @@ Default recovery directory:
 ```
 
 The recovery files are deleted automatically after `LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS` hours. Set `LOCALFLOW_SAVE_FAILED_RECORDINGS=false` to disable the safeguard.
+
+#### The Recovery Console
+
+`localflow-agent --recover` generates a self-contained `recovery.html` dashboard inside the recovery directory and opens it in your default browser. The page lists every retained recording with its status (pending/recovered), mode, age, error summary, `file://` links to the audio/metadata/transcript, and a click-to-copy retry command. It uses inlined CSS only — no external assets, no web server, no tracking.
+
+```bash
+localflow-agent --recover        # generate and open the console
+localflow-agent --recover --no-open   # generate only (headless / SSH)
+```
+
+If you installed via the installer, `localflow-recover` is a shortcut for `localflow-agent --recover`, and there is a **LocalFlow Recovery** entry in the Start Menu (Windows) / applications menu (Linux).
+
+#### Recovering from the command line
+
+```bash
+# List retained recordings newest-first
+localflow-agent --list-failed-recordings
+
+# Retry the newest unrecovered recording
+localflow-agent --retry-latest-failed
+
+# Retry a specific recording
+localflow-agent --retry-failed-recording "C:\Users\you\.localflow\failed-recordings\localflow-failed-20260614-220000-1700000000.wav"
+
+# Paste the recovered text at the cursor instead of copying to the clipboard
+localflow-agent --retry-latest-failed --paste
+
+# For an agent-mode (Alt+A) recording, also replay the web-search answer
+localflow-agent --retry-latest-failed --retry-agent-query
+```
+
+By default a retry **copies the recovered text to your clipboard** and saves a sibling `.txt` transcript next to the WAV. The sidecar is marked `status: recovered` with the retry timestamp and transcript filename.
+
+Retry is **local-first**: it reads the chosen WAV from disk and uploads only that single file to your configured transcription endpoint (`LOCALFLOW_API_URL`) using your Groq API key. No retained audio is uploaded unless you run a retry command. Agent-mode (`Alt+A`) recordings transcribe only by default — add `--retry-agent-query` to also replay the web-search voice-agent answer.
 
 The same settings can be stored in `~/.localflow/config.json`:
 
