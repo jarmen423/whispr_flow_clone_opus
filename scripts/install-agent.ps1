@@ -168,5 +168,9 @@ Write-Host "  Alt+T  - Toggle translation" -ForegroundColor Gray
 Write-Host "  Alt+J  - Format selected text" -ForegroundColor Gray
 Write-Host "  Alt+N  - Cleanup selected text" -ForegroundColor Gray
 Write-Host ""
-Write-Warn "Make sure the LocalFlow web server is running before starting the agent."
+Write-Host "Failed transcription recovery:"
+Write-Host "  Saved failed recordings: $env:USERPROFILE\.localflow\failed-recordings" -ForegroundColor Gray
+Write-Host "  Default retention: 72 hours" -ForegroundColor Gray
+Write-Host ""
+Write-Warn "The hosted API is used by default. On first run, enter your Groq API key if prompted."
 Write-Host ""

@@ -54,6 +54,7 @@ Example:
 import os
 import sys
 import argparse
+import json
 from pathlib import Path
 
 # Load .env from project root (parent of agent directory)
@@ -92,6 +93,25 @@ from recording_overlay import RecordingOverlay
 # ============================================
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable without raising on odd values."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a numeric environment variable without failing during import."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        return default
+
+
 @dataclass
 class Config:
     """Configuration container for the LocalFlow Desktop Agent.
@@ -124,6 +144,12 @@ class Config:
             raw, outline) that determines how the LLM refines the text.
         processing_mode: Where processing occurs - "cloud", "networked-local",
             or "local" depending on infrastructure deployment.
+        save_failed_recordings: Whether the agent keeps recoverable WAV files
+            when transcription fails before any text is returned.
+        failed_recordings_dir: Directory used for failed recording recovery
+            files and JSON sidecars.
+        failed_recordings_retention_hours: Number of hours to retain failed
+            recording files before automatic cleanup removes them.
         paste_cooldown: Minimum seconds between paste operations to
             prevent accidental rapid-fire text insertion.
 
@@ -152,6 +178,12 @@ class Config:
     selection_format_default_target: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_DEFAULT_TARGET", "markdown")
     selection_formatter_enabled: bool = os.getenv("LOCALFLOW_SELECTION_FORMAT_ENABLED", "true").lower() == "true"
     processing_mode: str = os.getenv("PROCESSING_MODE", "cloud")  # cloud, networked-local, local
+    save_failed_recordings: bool = _env_bool("LOCALFLOW_SAVE_FAILED_RECORDINGS", True)
+    failed_recordings_dir: str = os.getenv(
+        "LOCALFLOW_FAILED_RECORDINGS_DIR",
+        str(Path.home() / ".localflow" / "failed-recordings"),
+    )
+    failed_recordings_retention_hours: float = _env_float("LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS", 72.0)
     paste_cooldown: float = 0.1
 
 
@@ -183,6 +215,45 @@ def _save_config_file(data: dict) -> None:
             json.dump(data, f, indent=2)
     except Exception as e:
         log_warning(f"Failed to save config file: {e}")
+
+
+def _bool_setting(config_data: dict, key: str, env_name: str, default: bool) -> bool:
+    """Resolve a boolean setting from environment, config file, or default.
+
+    Environment variables win because operators often use them for temporary
+    overrides. The JSON config file remains useful for users who want durable
+    settings without editing their shell profile.
+    """
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        raw_value = config_data.get(key, default)
+
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        return raw_value.strip().lower() not in ("0", "false", "no", "off")
+    return bool(raw_value)
+
+
+def _float_setting(config_data: dict, key: str, env_name: str, default: float) -> float:
+    """Resolve a numeric setting from environment, config file, or default."""
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        raw_value = config_data.get(key, default)
+
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        log_warning(f"Invalid numeric setting for {env_name}/{key}: {raw_value!r}; using {default}")
+        return default
+
+
+def _string_setting(config_data: dict, key: str, env_name: str, default: str) -> str:
+    """Resolve a string setting from environment, config file, or default."""
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        raw_value = config_data.get(key, default)
+    return str(raw_value)
 
 
 def _ensure_api_key() -> str:
@@ -851,12 +922,163 @@ class LocalFlowAgent:
         self.selection_format_default_target = CONFIG.selection_format_default_target
         self.selection_formatter_enabled = CONFIG.selection_formatter_enabled
         self.agent_hotkey = CONFIG.agent_hotkey
+        config_data = _load_config_file()
+        self.save_failed_recordings = _bool_setting(
+            config_data,
+            "save_failed_recordings",
+            "LOCALFLOW_SAVE_FAILED_RECORDINGS",
+            CONFIG.save_failed_recordings,
+        )
+        self.failed_recordings_dir = Path(
+            _string_setting(
+                config_data,
+                "failed_recordings_dir",
+                "LOCALFLOW_FAILED_RECORDINGS_DIR",
+                CONFIG.failed_recordings_dir,
+            )
+        ).expanduser()
+        self.failed_recordings_retention_hours = max(
+            0.0,
+            _float_setting(
+                config_data,
+                "failed_recordings_retention_hours",
+                "LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS",
+                CONFIG.failed_recordings_retention_hours,
+            ),
+        )
         self.running = True
         self.hotkey_pressed = False
         self.format_mode_active = False  # True when using Alt+M formatting mode
         self.translate_mode_active = False  # True when using Alt+T translation mode
         self.agent_mode_active = False  # True when using Alt+A voice agent mode
         self.pasting_in_progress = False  # Flag to prevent keyboard listener interference
+
+    def _unlink_if_exists(self, path: Path) -> None:
+        """Remove a file if present while preserving Python 3.7 support."""
+        if path.exists():
+            path.unlink()
+
+    def _cleanup_failed_recordings(self) -> None:
+        """Delete expired failed-recording recovery files.
+
+        Failed recordings intentionally live on disk for a bounded window so a
+        user can recover speech after a transcription outage. Cleanup uses file
+        modification time so it also works for files left behind by a crashed
+        agent process.
+        """
+        if not self.failed_recordings_dir.exists():
+            return
+
+        retention_seconds = self.failed_recordings_retention_hours * 3600
+        now = time.time()
+
+        for path in self.failed_recordings_dir.glob("localflow-failed-*.wav"):
+            try:
+                if now - path.stat().st_mtime <= retention_seconds:
+                    continue
+
+                sidecar_path = path.with_suffix(".json")
+                self._unlink_if_exists(path)
+                self._unlink_if_exists(sidecar_path)
+                log_info(f"Deleted expired failed recording: {path}")
+            except Exception as e:
+                log_warning(f"Failed to clean up failed recording {path}: {e}")
+
+        for sidecar_path in self.failed_recordings_dir.glob("localflow-failed-*.json"):
+            try:
+                if sidecar_path.with_suffix(".wav").exists():
+                    continue
+                if now - sidecar_path.stat().st_mtime > retention_seconds:
+                    self._unlink_if_exists(sidecar_path)
+            except Exception as e:
+                log_warning(f"Failed to clean up failed recording metadata {sidecar_path}: {e}")
+
+    def _write_failed_recording_metadata(
+        self,
+        recording_path: Path,
+        status: str,
+        effective_mode: str,
+        translate: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        """Write the recovery sidecar for a retained recording.
+
+        The sidecar avoids storing secrets or request bodies. It exists to make
+        manual recovery easy: users can see when the recording happened, what
+        mode was active, and why the agent kept the WAV file.
+        """
+        metadata = {
+            "status": status,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "audio_file": recording_path.name,
+            "mode": effective_mode,
+            "processing_mode": self.processing_mode,
+            "translate": translate,
+            "retention_hours": self.failed_recordings_retention_hours,
+        }
+        if error:
+            metadata["error"] = error
+
+        with open(recording_path.with_suffix(".json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+    def _save_failed_recording_candidate(
+        self,
+        audio_bytes: bytes,
+        effective_mode: str,
+        translate: bool,
+    ) -> Optional[Path]:
+        """Persist a recoverable WAV before transcription can fail.
+
+        The file is called a candidate because successful transcription deletes
+        it immediately. Only files still present after an error are user-facing
+        recovery artifacts.
+        """
+        if not self.save_failed_recordings:
+            return None
+
+        try:
+            self._cleanup_failed_recordings()
+            self.failed_recordings_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            recording_path = self.failed_recordings_dir / f"localflow-failed-{timestamp}-{int(time.time() * 1000)}.wav"
+            with open(recording_path, "wb") as f:
+                f.write(audio_bytes)
+
+            self._write_failed_recording_metadata(recording_path, "pending", effective_mode, translate)
+            return recording_path
+        except Exception as e:
+            log_warning(f"Failed-recording safeguard could not save audio: {e}")
+            return None
+
+    def _retain_failed_recording(
+        self,
+        recording_path: Optional[Path],
+        effective_mode: str,
+        translate: bool,
+        error: str,
+    ) -> None:
+        """Mark a candidate recording as retained after transcription fails."""
+        if not recording_path:
+            return
+
+        try:
+            self._write_failed_recording_metadata(recording_path, "failed", effective_mode, translate, error)
+            log_warning(f"Failed recording saved for recovery: {recording_path}")
+        except Exception as e:
+            log_warning(f"Failed to update recovery metadata for {recording_path}: {e}")
+
+    def _discard_failed_recording_candidate(self, recording_path: Optional[Path]) -> None:
+        """Delete the temporary recovery candidate after transcription succeeds."""
+        if not recording_path:
+            return
+
+        try:
+            self._unlink_if_exists(recording_path)
+            self._unlink_if_exists(recording_path.with_suffix(".json"))
+        except Exception as e:
+            log_warning(f"Failed to discard successful recording recovery file {recording_path}: {e}")
 
     def _get_transcribe_endpoint(self) -> str:
         return f"{CONFIG.api_url.rstrip('/')}/api/dictation/transcribe"
@@ -1052,6 +1274,12 @@ class LocalFlowAgent:
             self.agent_mode_active = False
             return
 
+        failed_recording_path = self._save_failed_recording_candidate(
+            audio_bytes,
+            effective_mode,
+            self.translate_mode_active,
+        )
+
         # Convert to base64
         audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
 
@@ -1063,11 +1291,19 @@ class LocalFlowAgent:
         if not transcribe_result.get("success"):
             error = transcribe_result.get("error") or transcribe_result.get("details") or "Transcription failed"
             log_error(f"Transcription failed: {error}")
+            self._retain_failed_recording(
+                failed_recording_path,
+                effective_mode,
+                self.translate_mode_active,
+                error,
+            )
             self.overlay.show_status("Transcription failed", bg_color="#7a2e2e")
             self.format_mode_active = False
             self.translate_mode_active = False
             self.agent_mode_active = False
             return
+
+        self._discard_failed_recording_candidate(failed_recording_path)
 
         raw_text = transcribe_result.get("text", "")
         word_count = transcribe_result.get("wordCount", 0)
@@ -1524,6 +1760,8 @@ class LocalFlowAgent:
         if not self.api_key:
             self.api_key = _ensure_api_key()
 
+        self._cleanup_failed_recordings()
+
         log_info("=" * 60)
         log_info("LocalFlow Desktop Agent")
         log_info("=" * 60)
@@ -1535,6 +1773,14 @@ class LocalFlowAgent:
         log_info(f"Hotkey (selection format): {self.selection_format_hotkey}")
         log_info(f"Mode: {self.mode}")
         log_info(f"Processing: {self.processing_mode}")
+        if self.save_failed_recordings:
+            log_info(
+                "Failed recording recovery: "
+                f"{self.failed_recordings_dir} "
+                f"(retention: {self.failed_recordings_retention_hours:g}h)"
+            )
+        else:
+            log_info("Failed recording recovery: disabled")
         log_info("=" * 60)
 
         # Set up hotkey listener

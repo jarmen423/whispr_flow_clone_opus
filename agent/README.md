@@ -54,8 +54,33 @@ Set these environment variables:
 | `LOCALFLOW_TRANSLATE`      | `false`                    | Default translation mode (true/false)                                      |
 | `LOCALFLOW_MODE`           | `developer`                | Refinement mode (developer, concise, professional, raw, outline, cleanup)  |
 | `LOCALFLOW_PROCESSING`     | `cloud`                    | Processing mode (cloud, networked-local, local)                            |
+| `LOCALFLOW_SAVE_FAILED_RECORDINGS` | `true`             | Save recoverable WAV files when transcription fails before text is returned |
+| `LOCALFLOW_FAILED_RECORDINGS_DIR` | `~/.localflow/failed-recordings` | Directory for failed recording WAV files and metadata sidecars |
+| `LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS` | `72`      | Hours to keep failed recording files before automatic cleanup               |
 | `DEBUG`                    | -                          | Set to any value for debug logging                                         |
 | `CEREBRAS_API_KEY`         | -                          | Required for format mode (get from https://cloud.cerebras.ai/)             |
+
+### Failed Recording Recovery
+
+The agent saves a local recovery copy of each recording before sending it to the transcription API. If transcription succeeds, that temporary copy is deleted immediately. If transcription fails, the WAV remains on disk with a `.json` sidecar that records the active mode, processing backend, translation flag, retention window, and failure message.
+
+Default recovery directory:
+
+```text
+~/.localflow/failed-recordings
+```
+
+The recovery files are deleted automatically after `LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS` hours. Set `LOCALFLOW_SAVE_FAILED_RECORDINGS=false` to disable the safeguard.
+
+The same settings can be stored in `~/.localflow/config.json`:
+
+```json
+{
+  "save_failed_recordings": true,
+  "failed_recordings_dir": "C:\\Users\\you\\.localflow\\failed-recordings",
+  "failed_recordings_retention_hours": 72
+}
+```
 
 ### Format Mode Voice Commands
 

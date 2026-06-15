@@ -10,7 +10,51 @@ A fast, private, AI-powered dictation system with dual-mode hotkey support.
 
 ---
 
-## Quick Start
+## Desktop Agent Install Or Update
+
+Normal users do not need to run the legacy local web stack. The desktop agent records audio, sends it to the hosted API at `https://dictate.agentmemorylabs.com`, and uses your Groq API key for BYOK transcription.
+
+### Windows
+
+Run the installer again. If LocalFlow is already installed at `~/.localflow/localflow`, the script updates that checkout with `git pull`, refreshes dependencies, and keeps your saved `~/.localflow/config.json`.
+
+```powershell
+irm https://dictate.agentmemorylabs.com/api/download?platform=windows | iex
+```
+
+Then start the agent:
+
+```powershell
+localflow-agent
+```
+
+If your current terminal does not know that command yet:
+
+```powershell
+powershell $env:USERPROFILE\.local\bin\localflow-agent.ps1
+```
+
+### macOS / Linux
+
+```bash
+curl -fsSL "https://dictate.agentmemorylabs.com/api/download?platform=macos" | bash
+# or:
+curl -fsSL "https://dictate.agentmemorylabs.com/api/download?platform=linux" | bash
+```
+
+Then start the agent:
+
+```bash
+localflow-agent
+```
+
+The agent reads the Groq key from `GROQ_API_KEY`, `LOCALFLOW_API_KEY`, or `~/.localflow/config.json`. On first run it prompts for the key and saves it.
+
+---
+
+## Local Development Quick Start
+
+Use this when you are changing the Next.js app, API routes, or local development stack.
 
 ### Step 1: Install Dependencies
 
@@ -163,6 +207,11 @@ LOCALFLOW_SELECTION_FORMAT_HOTKEY=alt+j # Format highlighted text
 # Processing
 PROCESSING_MODE=cloud           # cloud | networked-local | local
 GROQ_API_KEY=your_key_here      # Get from https://groq.com/ (free tier is plenty)
+
+# Failed recording recovery (desktop agent)
+LOCALFLOW_SAVE_FAILED_RECORDINGS=true
+LOCALFLOW_FAILED_RECORDINGS_DIR=~/.localflow/failed-recordings
+LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS=72
 
 # Translation (optional)
 TRANSLATION_PROMPT="Correct technical terms"  # Style guidance for translation
