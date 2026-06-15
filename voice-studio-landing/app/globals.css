@@ -1,0 +1,309 @@
+@import "tailwindcss";
+
+/*
+ * Voice Studio — design tokens.
+ * Semantic-token-first: components consume token utilities, never raw hex.
+ * Light-first palette; dark is a first-class derivation (not an inversion).
+ */
+
+@theme {
+  /* ---- Type families (CSS vars wired in layout.tsx via next/font) ---- */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ---- Spacing: 8pt base scale ---- */
+  --spacing: 0.25rem; /* Tailwind v4 base unit (1 = 4px) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-24: 6rem;
+  --space-32: 8rem;
+
+  /* ---- Radii (soft, paper-like) ---- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 9999px;
+
+  /* ---- Motion tokens ---- */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 150ms;
+  --dur-med: 250ms;
+  --dur-slow: 400ms;
+
+  /* ---- Shadows (two-stop soft only, no heavy stacks) ---- */
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.04);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.08);
+
+  /* ---- Brand gradient (orb only) ---- */
+  --gradient-orb: radial-gradient(
+    circle at 30% 25%,
+    #ff9a7b 0%,
+    #ff7a59 30%,
+    #b666e6 70%,
+    #8b5cf6 100%
+  );
+}
+
+/*
+ * Semantic tokens — light theme (default).
+ * Components use these (--bg-canvas, --text-primary, etc.) via inline style
+ * or via the @utility aliases below.
+ */
+:root {
+  --bg-canvas: #faf8f5; /* warm off-white */
+  --bg-panel: #ffffff;
+  --bg-panel-2: #f3efe9;
+  --bg-elevated: #fffdf9;
+
+  --text-primary: #1a1a1a;
+  --text-muted: #5c5751;
+  --text-faint: #8a857e;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #e8e2d9;
+  --border-strong: #d4cdc1;
+
+  --accent: #c2410c; /* warm terracotta for links/focus — AA on bg-canvas */
+  --accent-hover: #9a3412;
+
+  --orb-glow-1: rgb(255 122 89 / 0.55);
+  --orb-glow-2: rgb(139 92 246 / 0.45);
+
+  color-scheme: light;
+}
+
+/* Dark — derived, warm near-black, never washed gray */
+.dark {
+  --bg-canvas: #14110e;
+  --bg-panel: #1c1814;
+  --bg-panel-2: #241f1a;
+  --bg-elevated: #2a2520;
+
+  --text-primary: #f5f1ea;
+  --text-muted: #b0a89d;
+  --text-faint: #807870;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: #34302a;
+  --border-strong: #47413a;
+
+  --accent: #fb923c;
+  --accent-hover: #fdba74;
+
+  --orb-glow-1: rgb(255 138 101 / 0.45);
+  --orb-glow-2: rgb(167 139 250 / 0.4);
+
+  color-scheme: dark;
+}
+
+/* ---- Base layer ---- */
+@layer base {
+  * {
+    border-color: var(--border-subtle);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+  }
+
+  /* Visible focus for keyboard users (forced-colors safe) */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* ---- Semantic utility aliases ---- */
+@utility bg-canvas {
+  background-color: var(--bg-canvas);
+}
+@utility bg-panel {
+  background-color: var(--bg-panel);
+}
+@utility bg-panel-2 {
+  background-color: var(--bg-panel-2);
+}
+@utility bg-elevated {
+  background-color: var(--bg-elevated);
+}
+@utility text-primary {
+  color: var(--text-primary);
+}
+@utility text-muted {
+  color: var(--text-muted);
+}
+@utility text-faint {
+  color: var(--text-faint);
+}
+@utility text-accent {
+  color: var(--accent);
+}
+@utility text-on-accent {
+  color: var(--text-on-accent);
+}
+@utility border-subtle {
+  border-color: var(--border-subtle);
+}
+@utility border-strong {
+  border-color: var(--border-strong);
+}
+@utility bg-accent {
+  background-color: var(--accent);
+}
+@utility shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+@utility shadow-lift {
+  box-shadow: var(--shadow-lift);
+}
+
+/* ---- Reveal animation (IO add-class fallback + scroll-timeline both) ---- */
+/* Default: hidden until revealed. Honors reduced motion by showing immediately. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity var(--dur-slow) var(--ease-out-quart),
+      transform var(--dur-slow) var(--ease-out-quart);
+    transition-delay: var(--reveal-delay, 0ms);
+    will-change: opacity, transform;
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* ---- Voice orb breathing (compositor-only) ---- */
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+@keyframes orb-breathe-active {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .orb-breathe {
+    animation: orb-breathe 6s var(--ease-out-quart) infinite;
+    will-change: transform;
+  }
+  .orb-breathe.is-speaking {
+    animation: orb-breathe-active 2.2s var(--ease-out-quart) infinite;
+  }
+}
+
+/* ---- Orb ripple rings (hover/focus listening state) ---- */
+@keyframes orb-ripple {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .orb-ripple {
+    animation: orb-ripple 2.4s var(--ease-out-quart) infinite;
+    will-change: transform, opacity;
+  }
+  .orb-ripple:nth-child(2) {
+    animation-delay: 1.2s;
+  }
+}
+
+/* ---- Streaming demo typing caret ---- */
+@keyframes caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+.caret {
+  display: inline-block;
+  width: 2px;
+  margin-left: 2px;
+  background-color: currentColor;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+/* ---- Scroll snap container ---- */
+.snap-x-story {
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+.snap-x-story > * {
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+}
+
+/* Hide scrollbar on the horizontal story for a cleaner look */
+.snap-x-story {
+  scrollbar-width: thin;
+}
+.snap-x-story::-webkit-scrollbar {
+  height: 6px;
+}
+.snap-x-story::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 9999px;
+}
+
+/* ---- Below-the-fold perf ---- */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
