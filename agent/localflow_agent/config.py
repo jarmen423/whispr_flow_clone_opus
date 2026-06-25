@@ -152,6 +152,11 @@ class Config:
     cleanup_hotkey: str = os.getenv("LOCALFLOW_CLEANUP_HOTKEY", "alt+n")
     selection_format_hotkey: str = os.getenv("LOCALFLOW_SELECTION_FORMAT_HOTKEY", "alt+j")
     agent_hotkey: str = os.getenv("LOCALFLOW_AGENT_HOTKEY", "alt+a")
+    # Toggle dictation slots: press once to start, press again to stop. These are
+    # distinct from the hold-to-record hotkeys above. Two slots are bound to the
+    # same toggle behavior so a fallback exists if an app hijacks one combo.
+    toggle_hotkey: str = os.getenv("LOCALFLOW_TOGGLE_HOTKEY", "alt+.")
+    toggle_hotkey_secondary: str = os.getenv("LOCALFLOW_TOGGLE_HOTKEY_2", "ctrl+.")
     mode: str = os.getenv(
         "LOCALFLOW_MODE", "developer"
     )

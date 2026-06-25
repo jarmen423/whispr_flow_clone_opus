@@ -1,5 +1,12 @@
 # Repo Notes
 
+## Modular Conventions
+We aim to keep the codebase modular and well-organized. When adding new features or making changes, please adhere to the following conventions:
+- **Single Responsibility Principle**: Each module should have a single responsibility and should not be overloaded with unrelated functionality.
+- **Separation of Concerns**: Keep related code together and unrelated code separate. This makes the codebase easier to navigate and maintain.
+- **Consistent Naming**: Use consistent and descriptive names for modules, functions, and variables. This makes the codebase easier to understand and maintain.
+- **LOC < ~ 400 per File**: Aim to keep individual files under 400 LOC to promote readability and maintainability. If a file exceeds this threshold, strongly favor refactoring it into smaller, more focused modules.
+
 ## Architecture (Current)
 
 LocalFlow uses a **hosted API + BYOK desktop agent** model:
@@ -29,6 +36,7 @@ The local WebSocket service (`mini-services/websocket-service/`) and local Next.
 | `Alt+A` | Voice agent — asks a question, web search grounded answer pasted | Hold to record, release to paste |
 | `Alt+J` | Format selected text — sends highlighted text to Cerebras formatter | Highlight first, then tap |
 | `Alt+N` | Cleanup selected text — repairs Whisper artifacts in highlighted text | Highlight first, then tap |
+| `Alt+.` / `Ctrl+.` | Toggle dictation — press once to start, press again to stop (raw dictation) | Tap to start, tap to stop |
 
 All Alt hotkeys support left Alt, right Alt, and AltGr variants automatically.
 
@@ -36,6 +44,7 @@ All Alt hotkeys support left Alt, right Alt, and AltGr variants automatically.
 
 - Keep dictation hotkeys in the `Alt+<letter>` space only.
 - Letters `L`, `M`, `T`, `A`, `J`, `N` are all reserved. Do not assign new features to these without updating this table.
+- The toggle dictation slot intentionally uses the **`.`** key (not a letter), so it cannot collide with any reserved Alt letter. Both `Alt+.` and `Ctrl+.` bind the same toggle behavior; either press starts/stops a toggle session. The two modes never interfere: starting a hold recording while a toggle session is active (and vice versa) is ignored.
 - The selected-text formatter (`Alt+J`) and cleanup (`Alt+N`) must never reuse a letter already assigned to a recording or translation shortcut.
 - For combo parsing, treat `ctrl+shift+j` style shortcuts as three tokens. The terminal key is the third token, not the second.
 

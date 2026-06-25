@@ -24,10 +24,18 @@ Key Technologies/APIs:
 """
 
 from typing import Optional
+import time
 
 from pynput import keyboard
 
-from .config import log_info, log_warning
+from .config import log_info, log_warning, log_debug
+
+
+# Minimum gap between two toggle-press callbacks. pynput's GlobalHotKeys can
+# fire the callback on the press edge, and some key combos double-fire on a
+# single physical press. Without this debounce a press could instant-start
+# then instant-stop a toggle session.
+TOGGLE_DEBOUNCE_SECONDS: float = 0.25
 
 
 def _parse_hotkey(hotkey_str: str) -> set:
@@ -227,6 +235,14 @@ def setup_hotkey_listener(agent) -> object:
     translate_char = translate_parts[1] if len(translate_parts) >= 2 else "t"
     cleanup_char = cleanup_parts[1] if len(cleanup_parts) >= 2 else "n"
     agent_char = agent_parts[1] if len(agent_parts) >= 2 else "a"
+
+    # Toggle dictation: press once to start, press again to stop. Two slots
+    # (alt+. and ctrl+. by default) are bound to the same toggle behavior so a
+    # fallback exists when an app hijacks one combo.
+    toggle_parts = agent.toggle_hotkey.lower().replace("+", " ").split()
+    toggle_secondary_parts = agent.toggle_hotkey_secondary.lower().replace("+", " ").split()
+    toggle_char = toggle_parts[1] if len(toggle_parts) >= 2 else "."
+    toggle_secondary_char = toggle_secondary_parts[1] if len(toggle_secondary_parts) >= 2 else "."
     if len(selection_parts) >= 3 and selection_parts[0] == "ctrl" and selection_parts[1] == "shift":
         selection_char = selection_parts[2]
     elif len(selection_parts) >= 2:
@@ -261,6 +277,33 @@ def setup_hotkey_listener(agent) -> object:
             alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
             combo_str = alt_names[alt_key] + "+" + agent_char
             hotkeys[combo_str] = lambda: _on_hotkey_press(agent, agent_mode=True)
+
+    # Register Toggle Dictation Hotkey (primary slot, e.g. alt+.)
+    if len(toggle_parts) >= 2 and toggle_parts[0] == "alt":
+        for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
+            alt_names = {Key.alt_l: "<alt_l>", Key.alt_r: "<alt_r>", Key.alt_gr: "<alt_gr>"}
+            combo_str = alt_names[alt_key] + "+" + toggle_char
+            # Skip combos already claimed by a hold/agent/selection hotkey so a
+            # misconfigured toggle key cannot silently shadow it.
+            if combo_str in hotkeys:
+                log_warning(
+                    f"Toggle hotkey '{agent.toggle_hotkey}' collides with an existing "
+                    f"recording hotkey ({combo_str}); skipping to avoid shadowing it"
+                )
+                continue
+            hotkeys[combo_str] = lambda: _on_toggle_hotkey_press(agent)
+
+    # Register Toggle Dictation Hotkey (secondary slot, e.g. ctrl+.)
+    if len(toggle_secondary_parts) >= 2 and toggle_secondary_parts[0] == "ctrl":
+        for ctrl_name in ["<ctrl_l>", "<ctrl_r>"]:
+            combo_str = f"{ctrl_name}+{toggle_secondary_char}"
+            if combo_str in hotkeys:
+                log_warning(
+                    f"Toggle hotkey '{agent.toggle_hotkey_secondary}' collides with an existing "
+                    f"recording hotkey ({combo_str}); skipping to avoid shadowing it"
+                )
+                continue
+            hotkeys[combo_str] = lambda: _on_toggle_hotkey_press(agent)
 
     if len(cleanup_parts) >= 2 and cleanup_parts[0] == "alt":
         for alt_key in [Key.alt_l, Key.alt_r, Key.alt_gr]:
@@ -304,17 +347,35 @@ def setup_hotkey_listener(agent) -> object:
             return
         agent.pressed_keys.discard(key)
 
-        if agent.hotkey_pressed and agent.recorder.is_recording():
+        # Only hold-to-record sessions are stopped by key release. Toggle
+        # sessions (recording_source == "toggle") must keep recording until the
+        # user presses the toggle combo again. This gate is the single most
+        # critical guard separating the two modes.
+        if (
+            agent.hotkey_pressed
+            and agent.recorder.is_recording()
+            and agent.recording_source == "hold"
+        ):
             is_alt = key in [Key.alt_l, Key.alt_r, Key.alt_gr, Key.alt]
+
+            # The release-stop set covers only the configured hold hotkey
+            # terminal chars. Toggle chars are intentionally excluded: a toggle
+            # session is gated out of this handler entirely (recording_source
+            # != "hold"), so including them would let a stray period-key release
+            # prematurely stop an in-progress hold session.
+            hold_chars = [
+                hotkey_char, format_char, translate_char,
+                cleanup_char, selection_char, agent_char,
+            ]
 
             is_char = False
             if hasattr(key, "char") and key.char:
                 k = key.char.lower()
-                is_char = k in [hotkey_char, format_char, translate_char, cleanup_char, selection_char, agent_char]
+                is_char = k in hold_chars
 
             vk = _get_vk(key)
             if vk:
-                vks = [ord(c.upper()) for c in [hotkey_char, format_char, translate_char, cleanup_char, selection_char, agent_char]]
+                vks = [ord(c.upper()) for c in hold_chars]
                 if vk in vks:
                     is_char = True
 
@@ -333,11 +394,60 @@ def setup_hotkey_listener(agent) -> object:
 def _on_hotkey_press(agent, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False) -> None:
     """Handle global hotkey press events.
 
-    Initiates recording with the appropriate mode flags.
+    Initiates a hold-to-record session with the appropriate mode flags. The
+    session is tagged ``source="hold"`` so the release listener auto-stops it
+    when the hotkey is released.
+
+    The ``is_recording()`` guard is the reciprocal of the toggle callback's
+    hold guard. Without it, pressing a hold hotkey during an active toggle
+    recording would latch ``hotkey_pressed`` True while ``recorder.start()``
+    returns False -- and since on_release only clears ``hotkey_pressed`` for
+    hold sessions, that latch would never release, permanently breaking
+    hold-to-record until the process restarts.
     """
-    if not agent.hotkey_pressed:
-        agent.hotkey_pressed = True
-        agent._start_recording(format_mode=format_mode, translate_mode=translate_mode, agent_mode=agent_mode)
+    if agent.hotkey_pressed or agent.recorder.is_recording():
+        return
+    agent.hotkey_pressed = True
+    agent._start_recording(
+        format_mode=format_mode,
+        translate_mode=translate_mode,
+        agent_mode=agent_mode,
+        source="hold",
+    )
+
+
+def _on_toggle_hotkey_press(agent) -> None:
+    """Handle the toggle dictation hotkey (press once to start, again to stop).
+
+    Toggle mode is independent of hold-to-record: it never sets
+    ``agent.hotkey_pressed`` (the hold-mode latch), so the key-release listener
+    will not stop a toggle session on release. A second press calls
+    ``_stop_recording`` to finish, transcribe (raw dictation), and paste.
+
+    Guards:
+        - Debounce: ignores a second callback within
+          ``TOGGLE_DEBOUNCE_SECONDS`` so a single physical press cannot
+          instant-start then instant-stop a session (pynput can double-fire).
+        - Cross-mode: if a hold recording is active, the toggle is ignored so
+          the two modes never fight over the recorder.
+    """
+    now = time.time()
+    if now - agent.last_toggle_time < TOGGLE_DEBOUNCE_SECONDS:
+        log_debug("Toggle ignored: within debounce window")
+        return
+    agent.last_toggle_time = now
+
+    # Don't interfere with an active hold-to-record session.
+    if agent.recorder.is_recording() and agent.recording_source == "hold":
+        log_debug("Toggle ignored: hold recording active")
+        return
+
+    if agent.recorder.is_recording():
+        log_info("Toggle dictation: stopping recording")
+        agent._stop_recording()
+    else:
+        log_info("Toggle dictation: starting recording")
+        agent._start_recording(source="toggle")
 
 
 def _on_selection_hotkey(agent, format_target: str) -> None:

@@ -160,15 +160,32 @@ class LocalFlowAgent:
         self.api_key = CONFIG.api_key
         self.mode = CONFIG.mode
         self.processing_mode = CONFIG.processing_mode
-        self.hotkey = CONFIG.hotkey
-        self.format_hotkey = CONFIG.format_hotkey
-        self.translate_hotkey = CONFIG.translate_hotkey
-        self.cleanup_hotkey = CONFIG.cleanup_hotkey
-        self.selection_format_hotkey = CONFIG.selection_format_hotkey
+        # Hotkeys are resolved with env > config.json > CONFIG default. Previously
+        # these were read from env only, so config.json could never override them.
+        # ``_string_setting`` makes ~/.localflow/config.json authoritative while
+        # keeping the existing env-var override behavior unchanged.
+        config_data = _load_config_file()
+        self.hotkey = _string_setting(config_data, "hotkey", "LOCALFLOW_HOTKEY", CONFIG.hotkey)
+        self.format_hotkey = _string_setting(config_data, "format_hotkey", "LOCALFLOW_FORMAT_HOTKEY", CONFIG.format_hotkey)
+        self.translate_hotkey = _string_setting(
+            config_data, "translate_hotkey", "LOCALFLOW_TRANSLATE_HOTKEY", CONFIG.translate_hotkey
+        )
+        self.cleanup_hotkey = _string_setting(
+            config_data, "cleanup_hotkey", "LOCALFLOW_CLEANUP_HOTKEY", CONFIG.cleanup_hotkey
+        )
+        self.selection_format_hotkey = _string_setting(
+            config_data, "selection_format_hotkey", "LOCALFLOW_SELECTION_FORMAT_HOTKEY", CONFIG.selection_format_hotkey
+        )
+        self.agent_hotkey = _string_setting(config_data, "agent_hotkey", "LOCALFLOW_AGENT_HOTKEY", CONFIG.agent_hotkey)
+        # Toggle dictation hotkeys (press once to start, press again to stop).
+        self.toggle_hotkey = _string_setting(
+            config_data, "toggle_hotkey", "LOCALFLOW_TOGGLE_HOTKEY", CONFIG.toggle_hotkey
+        )
+        self.toggle_hotkey_secondary = _string_setting(
+            config_data, "toggle_hotkey_secondary", "LOCALFLOW_TOGGLE_HOTKEY_2", CONFIG.toggle_hotkey_secondary
+        )
         self.selection_format_default_target = CONFIG.selection_format_default_target
         self.selection_formatter_enabled = CONFIG.selection_formatter_enabled
-        self.agent_hotkey = CONFIG.agent_hotkey
-        config_data = _load_config_file()
         self.save_failed_recordings = _bool_setting(
             config_data,
             "save_failed_recordings",
@@ -198,12 +215,19 @@ class LocalFlowAgent:
         self.translate_mode_active = False
         self.agent_mode_active = False
         self.pasting_in_progress = False
+        # Which trigger started the current recording. "hold" recordings stop on
+        # hotkey release; "toggle" recordings only stop on a second toggle press.
+        # None when idle. Read by hotkeys.on_release to gate the stop path.
+        self.recording_source: Optional[str] = None
+        # Debounce timestamp for the toggle callback; avoids an instant
+        # start->stop if pynput double-fires the toggle combo on one press.
+        self.last_toggle_time: float = 0.0
 
     # ------------------------------------------------------------------
     # Recording lifecycle (called by hotkey callbacks)
     # ------------------------------------------------------------------
 
-    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False) -> None:
+    def _start_recording(self, format_mode: bool = False, translate_mode: bool = False, agent_mode: bool = False, source: str = "hold") -> None:
         """Initiate audio recording session.
 
         Starts the AudioRecorder and displays the visual overlay.
@@ -214,12 +238,19 @@ class LocalFlowAgent:
             format_mode: If True, uses LLM formatting/outline mode.
             translate_mode: If True, uses translation mode.
             agent_mode: If True, uses voice agent Q&A mode.
+            source: Which trigger started this recording. "hold" (default)
+                recordings are stopped by the hotkey release listener;
+                "toggle" recordings are only stopped by a second toggle
+                press. Set on a successful start only and reset in
+                ``_stop_recording``.
 
         Returns:
             None
         """
         if self.recorder.start():
             self.overlay.show()
+            # Record the trigger so on_release only auto-stops hold sessions.
+            self.recording_source = source
 
             if agent_mode:
                 log_info("🤖 Agent mode recording started")
@@ -245,6 +276,14 @@ class LocalFlowAgent:
         Halts the audio recorder, hides the visual overlay, and sends the
         captured audio as multipart form data to the hosted API
         """
+        # Clear the trigger up-front (before recorder.stop() frees the device).
+        # This runs on the pynput Listener thread while a new hold recording can
+        # be started on the GlobalHotKeys thread during the multi-second API
+        # call below. A tail reset here would clobber that new session's
+        # recording_source, leaving it unstoppable via the on_release gate;
+        # clearing first means any later session sets its own source cleanly.
+        self.recording_source = None
+
         self.overlay.hide()
 
         audio_bytes = self.recorder.stop()
@@ -467,6 +506,8 @@ class LocalFlowAgent:
         log_info(f"Hotkey (translate): {self.translate_hotkey}")
         log_info(f"Hotkey (cleanup): {self.cleanup_hotkey}")
         log_info(f"Hotkey (selection format): {self.selection_format_hotkey}")
+        log_info(f"Hotkey (toggle primary): {self.toggle_hotkey}")
+        log_info(f"Hotkey (toggle secondary): {self.toggle_hotkey_secondary}")
         log_info(f"Mode: {self.mode}")
         log_info(f"Processing: {self.processing_mode}")
         if self.save_failed_recordings:
