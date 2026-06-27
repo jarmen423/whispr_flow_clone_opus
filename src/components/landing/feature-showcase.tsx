@@ -13,6 +13,7 @@ import {
   Download,
   Command,
   FileText,
+  VolumeX,
 } from "lucide-react";
 import { fadeInUp, staggerContainer } from "@/lib/animations";
 
@@ -54,6 +55,12 @@ function Features() {
       description:
         "Local processing mode keeps everything on your machine. No audio stored, no data retention, no surveillance.",
     },
+    {
+      icon: VolumeX,
+      title: "Auto-Mute While Recording",
+      description:
+        "Press a hotkey and LocalFlow mutes your system audio (music, videos, browser tabs) so the mic captures a clean voice signal. Restored automatically when you stop.",
+    },
   ];
 
   return (
@@ -71,7 +78,7 @@ function Features() {
             <span className="gradient-text">dictate like a pro</span>
           </motion.h2>
           <motion.p variants={fadeInUp} className="text-muted-foreground text-lg">
-            Six powerful features designed to make voice your fastest input method.
+            Seven powerful features designed to make voice your fastest input method.
           </motion.p>
         </motion.div>
 
@@ -110,6 +117,7 @@ function HotkeyShowcase() {
     { keys: ["Alt", "A"], label: "Voice Agent", desc: "Ask questions, get answers" },
     { keys: ["Alt", "J"], label: "Format Selection", desc: "Reformat highlighted text" },
     { keys: ["Alt", "N"], label: "Cleanup", desc: "Repair punctuation & grammar" },
+    { keys: ["Alt", "."], label: "Toggle Dictation", desc: "Press once to start, again to stop" },
   ];
 
   return (
@@ -127,7 +135,7 @@ function HotkeyShowcase() {
               Dictate from <span className="gradient-text">anywhere</span>
             </motion.h2>
             <motion.p variants={fadeInUp} className="text-muted-foreground text-lg mb-8">
-              Six global hotkeys that work in every application. No clicking, no switching windows — just hold, speak, and release.
+              Seven global hotkeys that work in every application. No clicking, no switching windows — just hold, speak, and release.
             </motion.p>
             <motion.div variants={fadeInUp} className="space-y-4">
               {hotkeys.map((h) => (

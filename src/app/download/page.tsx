@@ -112,9 +112,13 @@ export default function DownloadPage() {
             <Icon className={`h-8 w-8 ${config.color}`} />
           </div>
           <h1 className="text-3xl font-bold mb-2">Install LocalFlow</h1>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mb-4">
             One command to install on {config.label}. No signup required.
           </p>
+          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-medium text-primary">
+            <Sparkles className="h-3.5 w-3.5" />
+            v1.0.1 — Auto-mutes music &amp; videos while you dictate
+          </div>
         </div>
 
         {/* Platform tabs */}

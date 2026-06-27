@@ -14,7 +14,7 @@ import { fadeInUp, staggerContainer } from "@/lib/animations";
 function FreeVsAccount() {
   const freeFeatures = [
     "Full desktop dictation agent",
-    "All 6 global hotkeys (Alt+L, Alt+M, etc.)",
+    "All 7 global hotkeys (Alt+L, Alt+M, Alt+A, Alt+., etc.)",
     "AI formatting & translation",
     "Selected-text reformatting",
     "Local processing mode (offline)",

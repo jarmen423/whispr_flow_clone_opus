@@ -29,9 +29,14 @@ function Hero() {
           animate="visible"
           variants={staggerContainer}
         >
-          <motion.div variants={fadeInUp} className="mb-6">
+          <motion.div variants={fadeInUp} className="mb-4 flex flex-col sm:flex-row items-center justify-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-1.5 text-sm font-medium text-primary">
               <Sparkles className="h-4 w-4" />
+              New in v1.0.1 — Auto-mute music & videos while you dictate
+            </span>
+          </motion.div>
+          <motion.div variants={fadeInUp} className="mb-6">
+            <span className="inline-flex items-center gap-2 rounded-full bg-muted border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground">
               100% Free — No signup required
             </span>
           </motion.div>
