@@ -18,6 +18,28 @@ LocalFlow uses a **hosted API + BYOK desktop agent** model:
 
 The local WebSocket service (`mini-services/websocket-service/`) and local Next.js server are **deprecated** for end-user operation. They are still useful for local development but not required for normal use.
 
+## Repo Layout (Where Things Live)
+
+This repo contains the **entire hosted product** — the marketing/landing site, the API the desktop agent talks to, the download scripts, and the desktop agent itself. Everything that ships to users lives here and is auto-deployed to Vercel on push to `main`.
+
+| Path | What it is | Deploys to |
+|------|------------|------------|
+| `src/app/page.tsx` + `src/components/landing/*` | **Marketing landing page** (hero, features, CTA) | `dictate.agentmemorylabs.com/` |
+| `src/app/download/page.tsx` | **Download page** with one-line installer commands | `dictate.agentmemorylabs.com/download` |
+| `src/app/dashboard/page.tsx` | **Web dictation UI** + account/settings | `dictate.agentmemorylabs.com/dashboard` |
+| `src/app/setup/page.tsx` | **Setup guide** (Quick Config Generator for `.env`) | `dictate.agentmemorylabs.com/setup` |
+| `src/app/api/dictation/transcribe/route.ts` | Whisper transcription endpoint (BYOK Groq) | `dictate.agentmemorylabs.com/api/dictation/transcribe` |
+| `src/app/api/dictation/refine/route.ts` | LLM formatting endpoint (Cerebras) | `dictate.agentmemorylabs.com/api/dictation/refine` |
+| `src/app/api/agent/query/route.ts` | Voice-agent Q&A endpoint (Groq + Brave Search) | `dictate.agentmemorylabs.com/api/agent/query` |
+| `src/app/api/download/route.ts` | Serves the install scripts (no separate service) | `dictate.agentmemorylabs.com/api/download?platform=...` |
+| `scripts/install-agent.ps1` + `install-agent.sh` | **Installer scripts** served by `/api/download` | Embedded in API response |
+| `agent/localflow_agent/` | **Python desktop agent** (hotkeys, audio, paste) | Installed locally by the scripts via `uv tool install` |
+| `agent/README.md` | Desktop agent user docs | Bundled with the wheel (read by `pyproject.toml`) |
+| `CHANGELOG.md` | Release notes (Keep a Changelog format) | n/a |
+| `pyproject.toml` + `agent/version.txt` | Agent version (keep in sync; tag with `git tag v<version>`) | Read by installer at install time |
+
+The `voice-studio-landing/` directory at the repo root is a **stale scaffold** (only contains a `.gitignore` and leftover `.next` cache). Ignore it — all real frontend work happens in `src/app/`.
+
 ## Agent Flow
 
 1. Agent holds hotkey (e.g., `Alt+L`) → records audio via `sounddevice`

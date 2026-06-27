@@ -120,13 +120,22 @@ See [scripts/README.md](scripts/README.md) for more details.
 
 ## Architecture
 
-LocalFlow consists of three main components:
+This repo contains the **entire hosted product** — the marketing site, the API the desktop agent calls, the install scripts, and the desktop agent itself. Everything that ships to users lives in this repo and is auto-deployed to Vercel on push to `main`.
 
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| **Web UI** | Dictation interface, settings | `src/app/` |
-| **WebSocket Service** | Real-time agent communication | `mini-services/websocket-service/` |
-| **Desktop Agent** | Global hotkeys, audio capture | `agent/` |
+| Component | Purpose | Location | Live URL |
+|-----------|---------|----------|----------|
+| **Marketing site + Download** | Landing page, install commands | `src/app/page.tsx`, `src/app/download/page.tsx`, `src/components/landing/*` | `dictate.agentmemorylabs.com/` |
+| **Web dictation UI** | In-browser recorder, account/settings | `src/app/dashboard/page.tsx` | `dictate.agentmemorylabs.com/dashboard` |
+| **Setup guide** | Quick Config Generator for `.env` | `src/app/setup/page.tsx` | `dictate.agentmemorylabs.com/setup` |
+| **Hosted API** | Whisper, LLM formatting, voice agent, download scripts | `src/app/api/**/route.ts` | `dictate.agentmemorylabs.com/api/...` |
+| **Installer scripts** | One-line installer for Windows / macOS / Linux | `scripts/install-agent.ps1`, `scripts/install-agent.sh` | Served via `/api/download` |
+| **Desktop Agent** | Global hotkeys, audio capture, paste | `agent/localflow_agent/` | Installed locally by the installer as the `localflow-agent` CLI |
+
+The local WebSocket service (`mini-services/websocket-service/`) is **deprecated** for end users and only used for local development.
+
+> **Heads up:** the `voice-studio-landing/` directory at the repo root is a stale scaffold (only a `.gitignore` and leftover `.next` cache remain). Ignore it — all frontend work happens in `src/app/`.
+>
+> For a deeper dive on the repo layout, conventions, and architecture, see [AGENTS.md](AGENTS.md).
 
 ### Processing Modes
 
