@@ -791,6 +791,118 @@ def _print_replay_result(result: dict) -> None:
 # ============================================
 
 
+def _stop_background_agent() -> None:
+    """Kill any running background LocalFlow agent process."""
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["taskkill", "/IM", "localflow-agent.exe", "/F"],
+                capture_output=True, text=True,
+            )
+        else:
+            result = subprocess.run(
+                ["pkill", "-f", "localflow-agent"],
+                capture_output=True, text=True,
+            )
+        if result.returncode == 0:
+            print("LocalFlow agent stopped.")
+        else:
+            print("No running LocalFlow agent found.")
+    except FileNotFoundError:
+        print("No running LocalFlow agent found.")
+
+
+def _pretty_hotkey(hk: str) -> str:
+    """Format a hotkey string for display: 'alt+l' -> 'Alt+L'."""
+    return "+".join(p.strip().capitalize() for p in hk.split("+"))
+
+
+def _print_background_banner(agent: "LocalFlowAgent") -> None:
+    """Print hotkey summary before detaching to background."""
+    config_path = os.path.expanduser("~/.localflow/config.json")
+
+    print()
+    print("  LocalFlow agent is running in the background.")
+    print()
+    print("  Hold a hotkey, speak, release to paste:")
+    print()
+    print(f"    {_pretty_hotkey(agent.hotkey):<16} Raw dictation (fastest)")
+
+    hotkey_info = [
+        ("format_hotkey", "Format mode (outlines, lists)"),
+        ("translate_hotkey", "Translation toggle"),
+        ("toggle_hotkey", "Toggle dictation mode"),
+    ]
+    for attr, label in hotkey_info:
+        hk = getattr(agent, attr, None)
+        if hk:
+            print(f"    {_pretty_hotkey(hk):<16} {label}")
+
+    print()
+    print(f"  To change hotkeys, edit:")
+    print(f"    {config_path}")
+    print()
+    print("  To stop:        localflow-agent --stop")
+    print("  For debugging:  localflow-agent --foreground")
+    print()
+
+
+def _launch_in_background() -> None:
+    """Re-launch the agent with --foreground as a hidden background process.
+
+    On Windows, uses ``Start-Process -WindowStyle Hidden`` via PowerShell,
+    matching the proven approach from whispr-flow.ps1. No console window
+    is created, and closing the parent terminal does not kill the agent.
+
+    On macOS/Linux, uses ``nohup ... &`` via shell, matching whispr-flow.sh.
+    The agent survives the parent shell via SIGHUP ignore + background fork.
+    """
+    import subprocess
+    import shlex
+
+    log_dir = os.path.expanduser("~/.localflow")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "agent.log")
+
+    # Build the child command. Append --foreground so the child runs the
+    # event loop instead of recursing into background detach.
+    # On Windows, use the bare command name "localflow-agent" (not the full
+    # exe path) so PowerShell PATH resolution finds it, same as whispr-flow.ps1.
+    # The full path with backslashes breaks nested PowerShell quoting.
+    extra_args = [a for a in sys.argv[1:] if a not in ("--stop",)]
+
+    if sys.platform == "win32":
+        # Match whispr-flow.ps1: Start-Process powershell -Command "localflow-agent --foreground" -WindowStyle Hidden
+        child_cmd_str = "localflow-agent --foreground"
+        if extra_args:
+            child_cmd_str += " " + " ".join(extra_args)
+        ps_script = (
+            f"Start-Process powershell "
+            f"-ArgumentList @('-NoProfile','-Command','{child_cmd_str}') "
+            f"-WindowStyle Hidden"
+        )
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    else:
+        # macOS / Linux: nohup + background, same as whispr-flow.sh
+        child_cmd_parts = ["localflow-agent"] + extra_args + ["--foreground"]
+        full_cmd = "nohup " + " ".join(shlex.quote(p) for p in child_cmd_parts) \
+            + f" >> '{log_path}' 2>&1 &"
+        subprocess.Popen(
+            full_cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+
+
+
 def main() -> None:
     """Application entry point.
 
@@ -874,7 +986,21 @@ def main() -> None:
         action="store_true",
         help="With --recover, generate the console but do not open it in a browser",
     )
+    parser.add_argument(
+        "--foreground",
+        action="store_true",
+        help="Run in the foreground (blocks terminal, shows logs). Default is background.",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop a running background agent.",
+    )
     args = parser.parse_args()
+
+    if args.stop:
+        _stop_background_agent()
+        sys.exit(0)
 
     agent = LocalFlowAgent()
 
@@ -943,6 +1069,11 @@ def main() -> None:
         if not target:
             sys.exit(1)
         sys.exit(0 if agent.format_selected_text(target) else 1)
+
+    if not args.foreground:
+        _print_background_banner(agent)
+        _launch_in_background()
+        sys.exit(0)
 
     agent.run()
 
