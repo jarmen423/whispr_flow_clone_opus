@@ -63,6 +63,27 @@ def _file_url(path: Path) -> str:
     return html_module.escape(str(path).replace(os.sep, "/"))
 
 
+def _json_for_script(value) -> str:
+    """Serialize ``value`` as JSON that is safe to embed inside a ``<script>``.
+
+    Plain ``json.dumps`` is NOT safe in an HTML ``<script>`` context: a string
+    containing ``</script>`` would terminate the element, because the HTML
+    parser runs before the JS parser. Likewise U+2028 / U+2029 are legal inside
+    JSON strings but act as line terminators in JS string literals (a
+    SyntaxError on older engines). We escape ``&``, ``<``, ``>`` and the two
+    separators as JS unicode escapes, which a JS engine decodes back to the
+    original characters.
+    """
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 def _failed_row_html(e: dict) -> str:
     """Render one Failed-tab row (audio retained, retry re-runs the API)."""
     wav = e["path"]
@@ -141,15 +162,16 @@ def generate_recovery_console(
     *,
     failed_dir: Path,
     history_dir: Path,
-    retention_hours: float,
+    failed_retention_hours: float,
+    history_retention_hours: float,
 ) -> Path:
     """Write a self-contained tabbed ``recovery.html`` dashboard.
 
     The page has two tabs: **Failed** (retry re-runs the API) and
     **Successful** (text is already saved — copy to clipboard, no API call).
     All CSS/JS is inlined; the only network action is a user-initiated CLI
-    retry. Successful-tab transcripts are embedded as a JSON array so the
-    "Copy text" buttons work fully offline.
+    retry. Successful-tab transcripts are embedded as a script-safe JSON
+    array so the "Copy text" buttons work fully offline.
 
     Args:
         failed_entries: Output of ``recovery._enumerate_failed_recordings``.
@@ -157,7 +179,11 @@ def generate_recovery_console(
         failed_dir: Directory holding failed-audio artifacts (also the output
             location for ``recovery.html``).
         history_dir: Directory holding successful-text history artifacts.
-        retention_hours: Retention window, shown as a stat on the dashboard.
+        failed_retention_hours: Retention window for failed audio, shown on the
+            dashboard's Failed context.
+        history_retention_hours: Retention window for successful-text history,
+            shown on the dashboard's Successful context. Tracked separately so
+            the two windows can be configured independently.
 
     Returns:
         The Path to the written ``recovery.html``.
@@ -177,12 +203,16 @@ def generate_recovery_console(
     )
 
     # Default-open the tab that has content, preferring Failed when both exist.
-    default_tab = "failed" if (failed_entries or not history_entries) else "history"
+    # The active class is applied in Python at render time (no JS, no flash).
+    default_tab = "history" if (not failed_entries and history_entries) else "failed"
+    failed_active = "active" if default_tab == "failed" else ""
+    history_active = "active" if default_tab == "history" else ""
 
-    # Full transcripts embedded once as a JSON array -> valid JS string
-    # literals. Buttons reference by index, so there are no per-row escaping
-    # hazards and zero network round-trips to copy text.
-    history_texts_js = json.dumps([e.get("text", "") for e in history_entries], ensure_ascii=False)
+    # Full transcripts embedded once as a script-safe JSON array. ``_json_for_script``
+    # neutralises ``</script>`` and U+2028/U+2029 so a transcript can never break
+    # the page's own script element. Buttons reference by index, so there are no
+    # per-row escaping hazards and zero network round-trips to copy text.
+    history_texts_js = _json_for_script([e.get("text", "") for e in history_entries])
 
     failed_dir.mkdir(parents=True, exist_ok=True)
     html_path = failed_dir / "recovery.html"
@@ -247,14 +277,15 @@ def generate_recovery_console(
 <body>
   <header>
     <h1>LocalFlow Recovery Console</h1>
-    <div class="sub">Recover dictations from the last {retention_hours:g} hours. <b>Successful</b> entries need no API call &mdash; just copy the saved text.</div>
+    <div class="sub">Recover dictations from the last {failed_retention_hours:g}h (failed) / {history_retention_hours:g}h (successful). <b>Successful</b> entries need no API call &mdash; just copy the saved text.</div>
   </header>
 
   <div class="stats">
     <div class="stat"><div class="n">{len(recoverable)}</div><div class="l">Failed (retry)</div></div>
     <div class="stat"><div class="n">{len(recovered)}</div><div class="l">Recovered</div></div>
     <div class="stat"><div class="n">{len(history_entries)}</div><div class="l">Successful</div></div>
-    <div class="stat"><div class="n">{retention_hours:g}h</div><div class="l">Retention</div></div>
+    <div class="stat"><div class="n">{failed_retention_hours:g}h</div><div class="l">Failed retention</div></div>
+    <div class="stat"><div class="n">{history_retention_hours:g}h</div><div class="l">History retention</div></div>
   </div>
 
   <div class="privacy">
@@ -262,15 +293,15 @@ def generate_recovery_console(
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="failed">Failed<span class="count">{len(failed_entries)}</span></div>
-    <div class="tab" data-tab="history">Successful<span class="count">{len(history_entries)}</span></div>
+    <div class="tab {failed_active}" data-tab="failed">Failed<span class="count">{len(failed_entries)}</span></div>
+    <div class="tab {history_active}" data-tab="history">Successful<span class="count">{len(history_entries)}</span></div>
   </div>
 
-  <div class="section active" id="section-failed">
+  <div class="section {failed_active}" id="section-failed">
     {failed_rows}
   </div>
 
-  <div class="section" id="section-history">
+  <div class="section {history_active}" id="section-history">
     {history_rows}
   </div>
 
@@ -308,16 +339,8 @@ def generate_recovery_console(
         }});
       }});
     }});
-    // Open on the tab that actually has content.
-    (function(){{
-      var want = '{default_tab}';
-      var failedCount = {len(failed_entries)};
-      var histCount = {len(history_entries)};
-      var target = want === 'history' && histCount > 0 ? 'history' : (failedCount > 0 || histCount === 0 ? 'failed' : 'history');
-      if (target !== 'failed') {{
-        document.querySelector('.tab[data-tab="' + target + '"]').click();
-      }}
-    }})();
+    // The default tab is marked active at render time in Python, so there is
+    // no startup tab-switch script here (avoids a load flash and redundant JS).
   </script>
 </body>
 </html>

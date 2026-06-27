@@ -880,7 +880,8 @@ def main() -> None:
             history_entries,
             failed_dir=agent.failed_recordings_dir,
             history_dir=agent.history_dir,
-            retention_hours=agent.failed_recordings_retention_hours,
+            failed_retention_hours=agent.failed_recordings_retention_hours,
+            history_retention_hours=agent.history_retention_hours,
         )
         print(f"Recovery console written to: {html_path}")
         print(
