@@ -3,21 +3,25 @@ Failed-recording recovery subsystem for the LocalFlow Desktop Agent.
 
 Purpose & Reasoning:
     When transcription fails, the agent retains the WAV file on disk so the
-    user can recover their speech. This module provides the complete lifecycle:
-    writing a candidate before transcription, marking it as failed on error,
-    enumerating recordings, retrying them, generating a self-contained HTML
-    recovery dashboard, and cleaning up expired files.
+    user can recover their speech. This module provides the audio-side
+    lifecycle: writing a candidate before transcription, marking it as failed
+    on error, enumerating recordings, and retrying them through the shared
+    transcription pipeline. Expired-file cleanup is also here.
+
+    Rendering of the Recovery Console (the ``recovery.html`` dashboard) and
+    successful-transcript history live in sibling modules:
+    ``recovery_console.py`` (presentation) and ``history.py`` (saved text for
+    non-API failures). This split keeps each concern focused.
 
 Dependencies:
     - .config: CONFIG, log_* helpers.
-    - .api: process_audio_bytes (shared pipeline).
-    - .recording: PasteHandler is imported only for type annotation (it's
-      used by the retry path to paste recovered text).
+    - .api: process_audio_bytes (shared pipeline, imported lazily in retry).
+    - .recording: PasteHandler is imported only for type annotation (used by
+      the retry path to paste recovered text).
 
 Role in Codebase:
-    Used by __init__.py (the agent orchestrator) which delegates all recovery
-    operations to methods in this module. Depends on config.py, api.py, and
-    recording.py.
+    Used by __init__.py (the agent orchestrator) which delegates failed-audio
+    recovery operations to methods in this module.
 
 Key Technologies/APIs:
     - json: Sidecar file read/write for recovery metadata.
@@ -26,8 +30,6 @@ Key Technologies/APIs:
 """
 
 import json
-import os
-import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -35,38 +37,9 @@ from typing import Optional
 import pyperclip
 
 from .config import (
-    CONFIG,
-    CONFIG_DIR,
-    CONFIG_FILE,
-    _ensure_api_key,
-    _load_config_file,
-    _save_config_file,
-    _bool_setting,
-    _float_setting,
-    _string_setting,
-    log,
     log_info,
-    log_error,
     log_warning,
 )
-
-
-def _format_age(hours: float) -> str:
-    """Human-readable age string used by the recovery HTML dashboard."""
-    if hours < 1:
-        return f"{int(hours * 60)}m ago"
-    if hours < 24:
-        return f"{hours:.1f}h ago"
-    return f"{hours / 24:.1f}d ago"
-
-
-def _format_age_short(hours: float) -> str:
-    """Compact age string for the failed-recordings CLI listing."""
-    if hours < 1:
-        return f"{int(hours * 60)}m"
-    if hours < 24:
-        return f"{hours:.1f}h"
-    return f"{hours / 24:.1f}d"
 
 
 # ---------------------------------------------------------------------------
@@ -414,148 +387,3 @@ def _retry_latest_failed(
             api_key=api_key, processing_mode=processing_mode, paste_handler=paste_handler,
         )
     return {"success": False, "error": "No unrecovered failed recordings to retry"}
-
-
-def _generate_recovery_html(failed_recordings_dir: Path, retention_hours: float) -> Path:
-    """Write a self-contained ``recovery.html`` dashboard into the recovery dir.
-
-    The page lists every retained recording with status, mode, age, error
-    summary, file:// links to the WAV/sidecar/transcript, and a copyable
-    retry command. It uses inlined CSS only: no external assets, no web
-    server, no tracking.
-    """
-    import html as html_module
-
-    entries = _enumerate_failed_recordings(failed_recordings_dir)
-    recoverable = [e for e in entries if not e["recovered"]]
-    recovered = [e for e in entries if e["recovered"]]
-
-    def _row_html(e: dict) -> str:
-        wav = e["path"]
-        sidecar_path = wav.with_suffix(".json")
-        transcript_path = wav.with_suffix(".txt")
-        status = e["status"]
-        mode = e["mode"] or "unknown"
-        badge_class = "badge badge-recovered" if e["recovered"] else "badge badge-pending"
-        retry_cmd = f'localflow-agent --retry-failed-recording "{wav}"'
-        transcript_link = ""
-        if transcript_path.exists():
-            transcript_link = (
-                f'<a class="link" href="file:///{html_module.escape(str(transcript_path).replace(os.sep, "/"))}">transcript</a>'
-            )
-        error_html = ""
-        if e["error"]:
-            error_html = (
-                f'<div class="error">Error: {html_module.escape(str(e["error"]))}</div>'
-            )
-        agent_note = ""
-        if mode == "agent" and not e["recovered"]:
-            agent_note = '<div class="note">Agent mode retries transcribe only by default. Add --retry-agent-query to replay the web-search answer.</div>'
-        return f"""
-            <div class="row {"recovered-row" if e["recovered"] else ""}">
-              <div class="row-head">
-                <span class="{badge_class}">{html_module.escape(status)}</span>
-                <span class="mode">{html_module.escape(mode)}</span>
-                <span class="age">{html_module.escape(_format_age(e["age_hours"]))}</span>
-                {("<span class='translated'>translated</span>") if e["translate"] else ""}
-              </div>
-              <div class="filename">{html_module.escape(wav.name)}</div>
-              {error_html}
-              {agent_note}
-              <div class="links">
-                <a class="link" href="file:///{html_module.escape(str(wav).replace(os.sep, "/"))}">audio</a>
-                <a class="link" href="file:///{html_module.escape(str(sidecar_path).replace(os.sep, "/"))}">metadata</a>
-                {transcript_link}
-              </div>
-              {"<!-- recovered -->" if e["recovered"] else f'<div class="cmd" title="Click to copy"><code>{html_module.escape(retry_cmd)}</code></div>'}
-            </div>"""
-
-    rows_html = "\n".join(_row_html(e) for e in entries) if entries else '<p class="empty">No retained recordings. Saved audio is discarded automatically once transcription succeeds.</p>'
-
-    recovery_dir = failed_recordings_dir
-    html_path = recovery_dir / "recovery.html"
-    recovery_dir.mkdir(parents=True, exist_ok=True)
-
-    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
-    document = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LocalFlow Recovery Console</title>
-<style>
-  :root {{
-    --bg: #0f1117; --panel: #1a1d27; --panel-2: #222634; --text: #e6e8ef;
-    --muted: #9aa0b4; --accent: #5b9dff; --green: #3fb950; --amber: #d29922;
-    --red: #f85149; --border: #2c3142;
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    padding: 24px clamp(16px, 5vw, 48px);
-  }}
-  header h1 {{ margin: 0 0 4px; font-size: 22px; }}
-  header .sub {{ color: var(--muted); margin-bottom: 16px; }}
-  .stats {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }}
-  .stat {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; min-width: 120px; }}
-  .stat .n {{ font-size: 22px; font-weight: 600; }}
-  .stat .l {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }}
-  .privacy {{ background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; color: var(--muted); margin: 16px 0 24px; font-size: 13px; }}
-  .row {{ background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }}
-  .recovered-row {{ opacity: .65; }}
-  .row-head {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }}
-  .badge {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; }}
-  .badge-pending {{ background: rgba(210,153,34,.15); color: var(--amber); }}
-  .badge-recovered {{ background: rgba(63,185,80,.15); color: var(--green); }}
-  .mode {{ background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; font-size: 12px; color: var(--text); }}
-  .age, .translated {{ color: var(--muted); font-size: 12px; }}
-  .filename {{ font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--muted); word-break: break-all; margin-bottom: 6px; }}
-  .error {{ color: var(--red); font-size: 13px; margin: 4px 0; }}
-  .note {{ color: var(--muted); font-size: 12px; margin: 4px 0; }}
-  .links {{ display: flex; gap: 14px; margin-top: 8px; }}
-  .link {{ color: var(--accent); text-decoration: none; font-size: 13px; }}
-  .link:hover {{ text-decoration: underline; }}
-  .cmd {{ margin-top: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; cursor: pointer; }}
-  .cmd code {{ font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--text); word-break: break-all; }}
-  .empty {{ color: var(--muted); }}
-  footer {{ color: var(--muted); font-size: 12px; margin-top: 24px; }}
-</style>
-</head>
-<body>
-  <header>
-    <h1>LocalFlow Recovery Console</h1>
-    <div class="sub">Saved dictation audio lives here until it is recovered or the retention window expires.</div>
-  </header>
-
-  <div class="stats">
-    <div class="stat"><div class="n">{len(recoverable)}</div><div class="l">Recoverable</div></div>
-    <div class="stat"><div class="n">{len(recovered)}</div><div class="l">Recovered</div></div>
-    <div class="stat"><div class="n">{retention_hours:g}h</div><div class="l">Retention</div></div>
-  </div>
-
-  <div class="privacy">
-    Local-first: audio stays on your disk. Running a retry command uploads only that single file to your configured transcription endpoint. Nothing here is sent anywhere until you choose to retry.
-  </div>
-
-  {rows_html}
-
-  <footer>Generated {html_module.escape(now_str)} &middot; {html_module.escape(str(recovery_dir))}</footer>
-
-  <script>
-    document.querySelectorAll('.cmd').forEach(function(el){{
-      el.addEventListener('click', function(){{
-        var text = el.innerText.trim();
-        navigator.clipboard.writeText(text).then(function(){{
-          el.style.borderColor = '#3fb950';
-          setTimeout(function(){{ el.style.borderColor = ''; }}, 800);
-        }});
-      }});
-    }});
-  </script>
-</body>
-</html>
-"""
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(document)
-    return html_path

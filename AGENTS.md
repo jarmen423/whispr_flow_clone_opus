@@ -86,26 +86,39 @@ The `copy_selection()` method (used by Alt+J and Alt+N) uses a sentinel to detec
 
 This prevents stale clipboard content from being sent to the API when focus is wrong.
 
-## Failed Recording Recovery
+## Dictation Recovery (Failed + Successful)
 
-When transcription fails before any text is returned, the agent retains the recording on disk for manual recovery. This is local-first: nothing is uploaded unless the user explicitly runs a retry.
+The agent recovers dictations lost two distinct ways, surfaced together in one Recovery Console with **two tabs**:
 
-**Lifecycle**: A WAV candidate is written *before* transcription. On success it's deleted immediately. On failure the sidecar is rewritten to `status: failed` and the WAV is retained until the retention window expires.
+- **Failed tab** — the transcription API itself failed. Audio is retained on disk, so a retry re-runs the API. Local-first: nothing is uploaded unless the user explicitly retries.
+- **Successful tab** — the API succeeded, but the result was lost for a *non-API* reason (released the hotkey mid-sentence, paste missed the window, keyboard didn't register the hold, etc.). Only the returned **text** is retained, so recovery is a clipboard copy with **no API call**.
 
-**Artifacts** (in `~/.localflow/failed-recordings`):
+**Lifecycle**: A WAV candidate is written *before* transcription. On failure the sidecar is rewritten to `status: failed` and the WAV is retained until the failed-recording retention window expires. On success the WAV candidate is deleted immediately AND the returned text is saved to the history dir as a `.txt` + sidecar — audio is never kept for successful dictations.
+
+**Failed artifacts** (in `~/.localflow/failed-recordings`):
 - `localflow-failed-{YYYYMMDD-HHMMSS}-{epoch_millis}.wav` — 16kHz mono WAV
 - Sibling `.json` sidecar with: `status` (`pending` → `failed` → `recovered`), `created_at`, `audio_file`, `mode`, `processing_mode`, `translate`, `retention_hours`, optional `error`, plus `recovery_command` and `retry_command` so recovery doesn't require remembering docs. The sidecar deliberately excludes the API key and request bodies.
 - On successful retry, a sibling `.txt` transcript is written and the sidecar gains `recovered_at`, `recovered_text_file`, `retry_result`, `retried_at`, `agent_query_replayed`.
 
-**Config keys**: `LOCALFLOW_SAVE_FAILED_RECORDINGS`, `LOCALFLOW_FAILED_RECORDINGS_DIR`, `LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS` (env, or the same names without the prefix in `~/.localflow/config.json`).
+**Successful-history artifacts** (in `~/.localflow/history`, text only — never audio):
+- `localflow-history-{YYYYMMDD-HHMMSS}-{epoch_millis}.txt` — the final (refined/formatted) text that was pasted.
+- Sibling `.json` sidecar with: `status: success`, `created_at`, `text_file`, `mode`, `processing_mode`, `translate`, `chars`, `retention_hours`. No secrets.
+
+**Config keys** (env, or the same names without the prefix in `~/.localflow/config.json`):
+- Failed: `LOCALFLOW_SAVE_FAILED_RECORDINGS`, `LOCALFLOW_FAILED_RECORDINGS_DIR`, `LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS`.
+- History: `LOCALFLOW_SAVE_HISTORY` (default on), `LOCALFLOW_HISTORY_DIR`, `LOCALFLOW_HISTORY_RETENTION_HOURS` (default 72h).
 
 **Recovery CLI flags** (in `main()`, branched before `agent.run()` like `--format-selection`):
-- `--recover` — generate `recovery.html` (self-contained dark-theme dashboard) and open it. `--no-open` skips the browser (headless/SSH).
+- `--recover` — generate `recovery.html` (self-contained dark-theme dashboard with **Failed** and **Successful** tabs) and open it. `--no-open` skips the browser (headless/SSH). The Successful tab embeds each transcript with a "Copy text" button — no API call.
 - `--list-failed-recordings` — print retained recordings newest-first with retry commands.
-- `--retry-latest-failed` / `--retry-failed-recording <path>` — re-encode the WAV and run `process_audio_bytes`. Default output is **clipboard copy** + `.txt` transcript; `--paste` pastes at cursor instead.
-- `--retry-agent-query` — opt-in: for agent-mode (`Alt+A`) recordings, also replay the web-search voice-agent answer. **Off by default** — agent-mode retries transcribe only, because replaying a live web search is a different action than recovering speech.
+- `--list-history` — print saved successful transcripts newest-first with copy commands.
+- `--retry-latest-failed` / `--retry-failed-recording <path>` — re-encode the WAV and run `process_audio_bytes` (a real API call). Default output is **clipboard copy** + `.txt` transcript; `--paste` pastes at cursor instead.
+- `--replay-history <path>` — copy (or paste, with `--paste`) a saved successful transcript **without an API call**; the text is read straight from disk.
+- `--retry-agent-query` — opt-in: for agent-mode (`Alt+A`) failed recordings, also replay the web-search voice-agent answer. **Off by default** — agent-mode retries transcribe only, because replaying a live web search is a different action than recovering speech.
 
 **Shared pipeline**: `_stop_recording` and the retry path both call `LocalFlowAgent.process_audio_bytes(audio_bytes, mode, translate, run_agent_query=...)`. This helper does base64 → transcribe → (agent|refine|raw dispatch) and returns a structured dict. It never touches the overlay, paste handler, or failed-recording lifecycle, so callers compose it freely. If you change the transcribe/refine/agent dispatch logic, edit `process_audio_bytes` — both the live and retry paths pick up the change.
+
+**Module split**: `recovery.py` owns the failed-audio lifecycle + retry; `history.py` owns successful-text history (save/enumerate/cleanup/replay); `recovery_console.py` renders the two-tab `recovery.html` dashboard plus the age-formatting helpers shared by the CLI listings.
 
 **Failure overlay**: transcription failure shows `"Saved for recovery"` (blue `#24486b`), not an error — the audio is safely on disk. The detailed error goes to the log, and the path + `--recover` command are logged.
 

@@ -169,6 +169,17 @@ class Config:
         str(Path.home() / ".localflow" / "failed-recordings"),
     )
     failed_recordings_retention_hours: float = _env_float("LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS", 72.0)
+    # Successful-transcription history (text only). Unlike failed-recording
+    # recovery this keeps the returned text, NOT the audio, so a successful
+    # dictation can be re-grabbed from the Recovery Console without re-running
+    # the API. Covers non-API failures: released the hotkey mid-sentence,
+    # paste didn't land, keyboard didn't register, etc.
+    save_history: bool = _env_bool("LOCALFLOW_SAVE_HISTORY", True)
+    history_dir: str = os.getenv(
+        "LOCALFLOW_HISTORY_DIR",
+        str(Path.home() / ".localflow" / "history"),
+    )
+    history_retention_hours: float = _env_float("LOCALFLOW_HISTORY_RETENTION_HOURS", 72.0)
     paste_cooldown: float = 0.1
 
 

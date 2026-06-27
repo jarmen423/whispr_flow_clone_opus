@@ -96,9 +96,16 @@ from .recovery import (
     _retry_failed_recording,
     _retry_latest_failed,
     _enumerate_failed_recordings,
-    _generate_recovery_html,
     _cleanup_failed_recordings,
-    _format_age_short,
+)
+# Presentation of the Recovery Console and the age-formatting helpers moved to
+# recovery_console.py; successful-transcript history lives in history.py.
+from .recovery_console import generate_recovery_console, _format_age_short
+from .history import (
+    _save_successful_history,
+    _enumerate_history,
+    _cleanup_history,
+    _replay_history,
 )
 
 
@@ -207,6 +214,33 @@ class LocalFlowAgent:
                 "failed_recordings_retention_hours",
                 "LOCALFLOW_FAILED_RECORDINGS_RETENTION_HOURS",
                 CONFIG.failed_recordings_retention_hours,
+            ),
+        )
+        # Successful-transcription history keeps the returned TEXT (never the
+        # audio) so a non-API loss — released the hotkey early, paste missed
+        # the window, keyboard didn't register — can be recovered from the
+        # Recovery Console by copying saved text without a new API call.
+        self.save_history = _bool_setting(
+            config_data,
+            "save_history",
+            "LOCALFLOW_SAVE_HISTORY",
+            CONFIG.save_history,
+        )
+        self.history_dir = Path(
+            _string_setting(
+                config_data,
+                "history_dir",
+                "LOCALFLOW_HISTORY_DIR",
+                CONFIG.history_dir,
+            )
+        ).expanduser()
+        self.history_retention_hours = max(
+            0.0,
+            _float_setting(
+                config_data,
+                "history_retention_hours",
+                "LOCALFLOW_HISTORY_RETENTION_HOURS",
+                CONFIG.history_retention_hours,
             ),
         )
         self.running = True
@@ -353,6 +387,19 @@ class LocalFlowAgent:
         final_text = result["text"]
         if final_text:
             self.paste_handler.paste_text(final_text)
+            # Retain the returned text (NOT the audio) so a non-API loss can be
+            # recovered later from the Recovery Console by copying saved text
+            # without a new API call. The failed-recovery WAV candidate was
+            # already discarded above; this history entry is text-only.
+            _save_successful_history(
+                final_text,
+                effective_mode,
+                self.processing_mode,
+                self.translate_mode_active,
+                self.save_history,
+                self.history_dir,
+                self.history_retention_hours,
+            )
         else:
             log_warning("Final text is empty, skipping paste")
 
@@ -496,6 +543,7 @@ class LocalFlowAgent:
             self.api_key = _ensure_api_key()
 
         _cleanup_failed_recordings(self.failed_recordings_dir, self.failed_recordings_retention_hours)
+        _cleanup_history(self.history_dir, self.history_retention_hours)
 
         log_info("=" * 60)
         log_info("LocalFlow Desktop Agent")
@@ -518,6 +566,14 @@ class LocalFlowAgent:
             )
         else:
             log_info("Failed recording recovery: disabled")
+        if self.save_history:
+            log_info(
+                "Transcript history: "
+                f"{self.history_dir} "
+                f"(retention: {self.history_retention_hours:g}h)"
+            )
+        else:
+            log_info("Transcript history: disabled")
         log_info("=" * 60)
 
         listener = self._setup_hotkey_listener()
@@ -676,6 +732,54 @@ def _print_retry_result(result: dict) -> None:
             print(f"  Source: {result.get('wav_path')}")
 
 
+def _run_list_history(agent: LocalFlowAgent) -> None:
+    """Print saved successful transcripts newest-first to stdout.
+
+    Successful entries never need an API call to recover: the text already
+    exists on disk. This listing mirrors ``--list-failed-recordings`` so the
+    user can find the right ``--replay-history`` target.
+    """
+    entries = _enumerate_history(agent.history_dir)
+    if not entries:
+        print("No saved successful transcripts.")
+        print(f"Directory: {agent.history_dir}")
+        return
+
+    print(f"Saved successful transcripts ({len(entries)}):")
+    print(f"Directory: {agent.history_dir}")
+    print("-" * 60)
+    for e in entries:
+        translate_tag = " [translated]" if e["translate"] else ""
+        print(f"  {_format_age_short(e['age_hours']):>6} ago  [{e['mode']}]{translate_tag}  {e.get('chars', 0)} chars")
+        print(f"    {e['txt_path']}")
+        preview = e.get("text", "")
+        preview = preview if len(preview) <= 120 else preview[:117] + "..."
+        preview_flat = " ".join(preview.split())
+        print(f"    text: {preview_flat!r}")
+        print(f"    copy: localflow-agent --replay-history \"{e['txt_path']}\"")
+    print("-" * 60)
+
+
+def _print_replay_result(result: dict) -> None:
+    """Pretty-print the outcome of a ``--replay-history`` copy/paste.
+
+    Emphasises that no API call was made: the saved text was read from disk
+    and delivered to the clipboard (or pasted).
+    """
+    if result.get("success"):
+        action = "Pasted" if result.get("pasted") else "Copied to clipboard"
+        print(f"Saved transcript {action.lower()} (no API call).")
+        print(f"  Source: {result.get('txt_path')}")
+        text = result.get("text", "")
+        preview = text if len(text) <= 200 else text[:197] + "..."
+        print(f"  Preview: {preview!r}")
+    else:
+        err = result.get("error") or "Unknown error"
+        print(f"Replay failed: {err}")
+        if result.get("txt_path"):
+            print(f"  Source: {result.get('txt_path')}")
+
+
 # ============================================
 # MAIN ENTRY POINTS (used by pyproject.toml)
 # ============================================
@@ -722,12 +826,17 @@ def main() -> None:
     parser.add_argument(
         "--recover",
         action="store_true",
-        help="Generate and open the local Recovery Console (recovery.html) for failed recordings",
+        help="Generate and open the local Recovery Console (recovery.html): Failed tab (retry needs an API call) and Successful tab (copy saved text, no API call)",
     )
     parser.add_argument(
         "--list-failed-recordings",
         action="store_true",
         help="Print retained failed recordings newest-first and exit",
+    )
+    parser.add_argument(
+        "--list-history",
+        action="store_true",
+        help="Print saved successful transcripts newest-first and exit",
     )
     parser.add_argument(
         "--retry-latest-failed",
@@ -738,6 +847,11 @@ def main() -> None:
         "--retry-failed-recording",
         metavar="PATH",
         help="Retry transcription of a specific failed recording WAV path",
+    )
+    parser.add_argument(
+        "--replay-history",
+        metavar="PATH",
+        help="Copy (or paste, with --paste) a saved successful transcript to the cursor WITHOUT an API call",
     )
     parser.add_argument(
         "--paste",
@@ -759,8 +873,20 @@ def main() -> None:
     agent = LocalFlowAgent()
 
     if args.recover:
-        html_path = _generate_recovery_html(agent.failed_recordings_dir, agent.failed_recordings_retention_hours)
+        failed_entries = _enumerate_failed_recordings(agent.failed_recordings_dir)
+        history_entries = _enumerate_history(agent.history_dir)
+        html_path = generate_recovery_console(
+            failed_entries,
+            history_entries,
+            failed_dir=agent.failed_recordings_dir,
+            history_dir=agent.history_dir,
+            retention_hours=agent.failed_recordings_retention_hours,
+        )
         print(f"Recovery console written to: {html_path}")
+        print(
+            f"  Failed: {len(failed_entries)} (retry re-runs the API)  |  "
+            f"Successful: {len(history_entries)} (copy saved text, no API call)"
+        )
         if not args.no_open:
             _open_in_browser(html_path)
         sys.exit(0)
@@ -768,6 +894,16 @@ def main() -> None:
     if args.list_failed_recordings:
         _run_list_failed_recordings(agent)
         sys.exit(0)
+
+    if args.list_history:
+        _run_list_history(agent)
+        sys.exit(0)
+
+    if args.replay_history:
+        # No API key required: the text is already on disk.
+        result = _replay_history(Path(args.replay_history), paste=args.paste, paste_handler=agent.paste_handler)
+        _print_replay_result(result)
+        sys.exit(0 if result.get("success") else 1)
 
     if args.retry_latest_failed or args.retry_failed_recording:
         if not agent.api_key:
