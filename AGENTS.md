@@ -24,7 +24,7 @@ This repo contains the **entire hosted product** — the marketing/landing site,
 
 | Path | What it is | Deploys to |
 |------|------------|------------|
-| `src/app/page.tsx` + `src/components/landing/*` | **Marketing landing page** (hero, features, CTA) | `dictate.agentmemorylabs.com/` |
+| `src/app/page.tsx` + `src/components/landing/*` | **Marketing landing page** (hero, features, CTA) — current production site | `dictate.agentmemorylabs.com/` |
 | `src/app/download/page.tsx` | **Download page** with one-line installer commands | `dictate.agentmemorylabs.com/download` |
 | `src/app/dashboard/page.tsx` | **Web dictation UI** + account/settings | `dictate.agentmemorylabs.com/dashboard` |
 | `src/app/setup/page.tsx` | **Setup guide** (Quick Config Generator for `.env`) | `dictate.agentmemorylabs.com/setup` |
@@ -38,7 +38,14 @@ This repo contains the **entire hosted product** — the marketing/landing site,
 | `CHANGELOG.md` | Release notes (Keep a Changelog format) | n/a |
 | `pyproject.toml` + `agent/version.txt` | Agent version (keep in sync; tag with `git tag v<version>`) | Read by installer at install time |
 
-The `voice-studio-landing/` directory at the repo root is a **stale scaffold** (only contains a `.gitignore` and leftover `.next` cache). Ignore it — all real frontend work happens in `src/app/`.
+### Branches under development (not on `main`)
+
+- `landing/` — A **separate, standalone Next.js marketing site** (its own `package.json`, `next.config.ts`, `src/app/`). Currently lives on the `dictate-landing-c1-terminal-velo` feature branch as the "Terminal Velocity" redesign. **Not deployed to production.** When it gets merged to `main`, Vercel will pick it up automatically (same Vercel project, same auto-deploy hook). Until then, `src/app/page.tsx` is the live marketing site.
+
+### Stale directories to ignore
+
+- `voice-studio-landing/` (Windows checkout) — empty scaffold, only a `.gitignore` and leftover `.next` cache. Ignore it.
+- `landing/` on `main` — does not exist on `main`; it only exists on the `dictate-landing-c1-terminal-velo` branch. Don't look for it on `main` and don't merge it accidentally.
 
 ## Agent Flow
 
