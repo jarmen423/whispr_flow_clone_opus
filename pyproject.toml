@@ -30,6 +30,7 @@ dependencies = [
     "pyperclip>=1.8.2",
     "pyautogui>=0.9.54",
     "python-dotenv>=1.0.0",
+    "pycaw>=20240210",  # Windows Core Audio control (master volume mute) for auto-mute during dictation
 ]
 
 [project.scripts]

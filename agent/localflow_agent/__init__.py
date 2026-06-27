@@ -98,6 +98,7 @@ from .recovery import (
     _enumerate_failed_recordings,
     _cleanup_failed_recordings,
 )
+from .audio_control import SystemAudioController
 # Presentation of the Recovery Console and the age-formatting helpers moved to
 # recovery_console.py; successful-transcript history lives in history.py.
 from .recovery_console import generate_recovery_console, _format_age_short
@@ -256,6 +257,7 @@ class LocalFlowAgent:
         # Debounce timestamp for the toggle callback; avoids an instant
         # start->stop if pynput double-fires the toggle combo on one press.
         self.last_toggle_time: float = 0.0
+        self.audio_controller = SystemAudioController()
 
     # ------------------------------------------------------------------
     # Recording lifecycle (called by hotkey callbacks)
@@ -283,6 +285,8 @@ class LocalFlowAgent:
         """
         if self.recorder.start():
             self.overlay.show()
+            # Mute system audio to prevent background sources from interfering with mic
+            self.audio_controller.mute_for_recording()
             # Record the trigger so on_release only auto-stops hold sessions.
             self.recording_source = source
 
@@ -319,6 +323,8 @@ class LocalFlowAgent:
         self.recording_source = None
 
         self.overlay.hide()
+        # Restore previous system audio state (unmute if we muted it)
+        self.audio_controller.restore_after_recording()
 
         audio_bytes = self.recorder.stop()
 

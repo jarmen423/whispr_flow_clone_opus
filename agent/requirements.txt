@@ -22,3 +22,6 @@ pyautogui>=0.9.54
 
 # Environment variables
 python-dotenv
+
+# Windows system audio mute control (for auto-mute feature during dictation)
+pycaw>=20240210
