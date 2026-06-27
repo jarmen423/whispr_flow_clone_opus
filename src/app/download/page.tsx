@@ -12,9 +12,7 @@ import {
   Apple,
   TerminalSquare,
   ArrowLeft,
-  Loader2,
   Sparkles,
-  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -55,16 +53,14 @@ export default function DownloadPage() {
   const [platform, setPlatform] = useState<Platform>("windows");
   const [copied, setCopied] = useState(false);
   const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
       .then((r) => r.json())
       .then((data) => {
         if (data.success) setUser(data.user);
-        setAuthChecked(true);
       })
-      .catch(() => setAuthChecked(true));
+      .catch(() => {});
   }, []);
 
   useEffect(() => {

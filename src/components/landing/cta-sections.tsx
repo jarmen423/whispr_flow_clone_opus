@@ -42,7 +42,7 @@ function FreeVsAccount() {
         >
           <motion.h2 variants={fadeInUp} className="text-3xl md:text-4xl font-bold mb-4">
             Generous free tier.{" "}
-            <span className="gradient-text">Upgrade when you're ready.</span>
+            <span className="gradient-text">Upgrade when you&apos;re ready.</span>
           </motion.h2>
           <motion.p variants={fadeInUp} className="text-muted-foreground text-lg">
             Everything you need to start dictating is free. Create an account to unlock cloud features.
