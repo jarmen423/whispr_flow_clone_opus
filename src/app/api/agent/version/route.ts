@@ -8,6 +8,6 @@ export async function GET() {
     const version = readFileSync(versionPath, "utf-8").trim();
     return NextResponse.json({ success: true, version, changelog: "" });
   } catch {
-    return NextResponse.json({ success: true, version: "1.0.0", changelog: "" });
+    return NextResponse.json({ success: true, version: "1.0.1", changelog: "" });
   }
 }

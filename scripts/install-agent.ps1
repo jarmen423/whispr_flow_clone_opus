@@ -149,8 +149,10 @@ Write-Host "Or find it in your Start Menu: LocalFlow > LocalFlow Agent" -Foregro
 Write-Host ""
 Write-Host "Hotkeys (hold to record, release to paste):"
 Write-Host "  Alt+L  - Raw dictation" -ForegroundColor Gray
-Write-Host "  Alt+M  - AI formatting" -ForegroundColor Gray
-Write-Host "  Alt+T  - Toggle translation" -ForegroundColor Gray
+Write-Host "  Alt+M  - AI formatting (outlines, lists)" -ForegroundColor Gray
+Write-Host "  Alt+T  - Translate mode (speak any language -> English)" -ForegroundColor Gray
+Write-Host "  Alt+A  - Voice agent (ask a question, web-search grounded answer)" -ForegroundColor Gray
+Write-Host "  Alt+.  - Toggle dictation (press once to start, again to stop)" -ForegroundColor Gray
 Write-Host "  Alt+J  - Format selected text" -ForegroundColor Gray
 Write-Host "  Alt+N  - Cleanup selected text" -ForegroundColor Gray
 Write-Host ""

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Auto-Mute System Audio During Dictation
+
+**New Feature:** When the user presses a dictation hotkey, the agent temporarily mutes the system master audio (music, videos, browser tabs, etc.) so the microphone captures a clean voice signal. The previous mute state is automatically restored when recording stops.
+
+**Why**
+- Background audio bleeds into the mic and degrades Whisper transcription accuracy, especially with music, YouTube, or system notifications playing
+- Muting the system master is global, so it works regardless of which app is playing audio
+- The previous mute state is preserved — if the user already had audio muted, it stays muted; if it was unmuted, it returns to unmuted
+
+**Implementation**
+- Windows-only via pycaw (Python bindings for the Core Audio API)
+- Gracefully degrades on macOS/Linux or if pycaw is unavailable: logs a warning, dictation continues normally without the mute behavior
+- A `SystemAudioController` saves the current mute state on `_start_recording()`, calls `SetMute(1)`, and restores on `_stop_recording()`
+- New dependency: `pycaw>=20240210` (added to `pyproject.toml` and `agent/requirements.txt`)
+
+**Files Changed**
+- `agent/localflow_agent/audio_control.py` - New module: `SystemAudioController` class
+- `agent/localflow_agent/__init__.py` - Imported and instantiated the controller; added mute/restore calls in the recording lifecycle
+- `pyproject.toml` - Added `pycaw>=20240210` dependency
+- `agent/requirements.txt` - Added `pycaw>=20240210`
+
+---
+
 ### Added - Voice Agent Mode (Alt+A) with Web Search
 
 **New Feature:** Hold `Alt+A`, speak a question, release — answer is pasted at the cursor. Searches the web automatically when the question requires current information.
