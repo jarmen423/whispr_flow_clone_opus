@@ -211,6 +211,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ success: false, error: "text is required" }, { status: 400 });
     }
 
+    // Surface the missing-key case with a clear 503 + actionable message
+    // instead of the generic 500. Users hitting this should either:
+    //   (a) configure GROQ_API_KEY (or ZAI_API_KEY) on the host (Vercel env var), or
+    //   (b) install voiceuse locally so the agent falls back to the on-device Brain.
+    if (!GROQ_API_KEY) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Hosted agent endpoint is not configured (missing GROQ_API_KEY on the server). " +
+            "Either set GROQ_API_KEY in your Vercel project env vars, or run " +
+            "`localflow-agent --setup` on the desktop agent to install the local " +
+            "voiceuse fallback (which uses your BYOK Groq key directly).",
+          code: "HOSTED_AGENT_NOT_CONFIGURED",
+        },
+        { status: 503 },
+      );
+    }
+
     console.log(`[Agent] Query (${text.length} chars): "${text.substring(0, 100)}"`);
     const answer = await queryAgent(text.trim());
     console.log(`[Agent] Answer ready (${answer.length} chars)`);

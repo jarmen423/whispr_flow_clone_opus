@@ -206,6 +206,23 @@ def _agent_query(text: str) -> dict:
             timeout=45,
             headers={"Content-Type": "application/json"},
         )
+        # Special-case the HOSTED_AGENT_NOT_CONFIGURED 503 so the user
+        # sees an actionable error instead of a generic 500. The
+        # workaround is: install voiceuse locally via
+        # `localflow-agent --setup` so the local Brain handles the query.
+        if response.status_code == 503:
+            try:
+                body = response.json()
+            except Exception:
+                body = {}
+            if body.get("code") == "HOSTED_AGENT_NOT_CONFIGURED":
+                msg = body.get("error", "Hosted agent endpoint not configured")
+                log_error(
+                    "Voice agent is unavailable: hosted endpoint is not configured. "
+                    "Run `localflow-agent --setup` to install the local voiceuse "
+                    "fallback (uses your BYOK Groq key directly, no server required)."
+                )
+                return {"success": False, "error": msg}
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
