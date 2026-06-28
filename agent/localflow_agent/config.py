@@ -181,6 +181,11 @@ class Config:
     )
     history_retention_hours: float = _env_float("LOCALFLOW_HISTORY_RETENTION_HOURS", 72.0)
     paste_cooldown: float = 0.1
+    # Ghost mode: suppress TTS for agent responses (Alt+A). The agent's
+    # text response is still pasted at the cursor AND saved to the
+    # transcript history (viewable via `localflow-agent --recover`),
+    # but no audio is played.
+    ghost_mode: bool = _env_bool("LOCALFLOW_GHOST_MODE", False)
 
 
 CONFIG = Config()

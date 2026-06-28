@@ -258,6 +258,12 @@ class LocalFlowAgent:
         # Debounce timestamp for the toggle callback; avoids an instant
         # start->stop if pynput double-fires the toggle combo on one press.
         self.last_toggle_time: float = 0.0
+        self.ghost_mode = _bool_setting(
+            config_data,
+            "ghost_mode",
+            "LOCALFLOW_GHOST_MODE",
+            CONFIG.ghost_mode,
+        )
         self.audio_controller = SystemAudioController()
 
     # ------------------------------------------------------------------
@@ -362,6 +368,7 @@ class LocalFlowAgent:
             self.api_key,
             self.processing_mode,
             run_agent_query=True,
+            ghost=self.ghost_mode,
         )
 
         if not result["success"]:
@@ -1096,6 +1103,11 @@ def main() -> None:
         help="Run in the foreground (blocks terminal, shows logs). Default is background.",
     )
     parser.add_argument(
+        "--ghost",
+        action="store_true",
+        help="Ghost mode: suppress TTS for agent responses (Alt+A). The agent's text response is still pasted at the cursor and saved to transcript history (viewable via --recover), but no audio is played.",
+    )
+    parser.add_argument(
         "--stop",
         action="store_true",
         help="Stop a running background agent.",
@@ -1191,6 +1203,9 @@ def main() -> None:
         if not target:
             sys.exit(1)
         sys.exit(0 if agent.format_selected_text(target) else 1)
+
+    if args.ghost:
+        agent.ghost_mode = True
 
     if not args.foreground:
         _print_background_banner(agent)

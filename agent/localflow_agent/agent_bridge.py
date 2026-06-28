@@ -93,7 +93,7 @@ def _get_brain(config_path: Optional[str] = None) -> Any:
     return brain
 
 
-def run_agent(transcript: str, config_path: Optional[str] = None) -> Dict[str, Any]:
+def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = False) -> Dict[str, Any]:
     """Execute a voice command through the VoiceUse Brain pipeline.
 
     Called from LocalFlow's _stop_recording when agent_mode_active is True.
@@ -145,7 +145,7 @@ def run_agent(transcript: str, config_path: Optional[str] = None) -> Dict[str, A
         # The TTS manager is async (edge-tts queue worker), so we call
         # speak() on the same loop and then keep the loop alive briefly
         # so the audio actually plays before we tear it down.
-        if result.success and result.message:
+        if result.success and result.message and not ghost:
             try:
                 loop.run_until_complete(
                     brain.tts_manager.speak(result.message, interrupt=True)

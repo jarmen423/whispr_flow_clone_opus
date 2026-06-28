@@ -163,7 +163,7 @@ def _refine_text(text: str, mode: str, processing_mode: str, translate: bool = F
         return {"success": False, "error": str(e)}
 
 
-def _agent_query(text: str) -> dict:
+def _agent_query(text: str, ghost: bool = False) -> dict:
     """Send text to the voice agent and return the answer.
 
     When VoiceUse is installed locally, runs the command through the
@@ -182,7 +182,7 @@ def _agent_query(text: str) -> dict:
 
         if is_available():
             log_info("Running voice command via VoiceUse Brain...")
-            result = run_agent(text)
+            result = run_agent(text, ghost=ghost)
             if result.get("success"):
                 return {
                     "success": True,
@@ -265,6 +265,7 @@ def process_audio_bytes(
     api_key: str,
     processing_mode: str,
     run_agent_query: bool = True,
+    ghost: bool = False,
 ) -> dict:
     """Transcribe WAV bytes and run the mode-appropriate post-processing.
 
@@ -321,7 +322,7 @@ def process_audio_bytes(
     if mode == "agent":
         if run_agent_query:
             log_info("Sending to voice agent...")
-            agent_result = _agent_query(raw_text)
+            agent_result = _agent_query(raw_text, ghost=ghost)
             if agent_result.get("success"):
                 final_text = agent_result.get("answer", "")
                 log_info(f"Agent answer: {len(final_text)} chars")

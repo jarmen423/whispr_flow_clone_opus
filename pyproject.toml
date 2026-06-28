@@ -47,6 +47,13 @@ agent = [
     # every Alt+A press fails with "All LLM providers failed".
     "groq>=1.0.0",
     "openai>=1.0.0",
+    # TTS: VoiceUse's TTSManager tries edge-tts first (free neural voices),
+    # falls back to pyttsx3 (offline system TTS). pygame is the audio
+    # playback backend. Without these, speak() silently fails and the
+    # agent is a mute ghost even when configured.
+    "edge-tts>=6.1.0",
+    "pyttsx3>=2.90",
+    "pygame>=2.5.0",
 ]
 
 [project.scripts]
