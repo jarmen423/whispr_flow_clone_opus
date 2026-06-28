@@ -42,6 +42,11 @@ agent = [
     "mss>=9.0.1",
     "pygetwindow>=0.0.9",
     "pywin32>=306; sys_platform == 'win32'",
+    # VoiceUse's Brain needs these SDK packages to talk to LLM providers.
+    # Without them, _init_clients() silently skips all providers and
+    # every Alt+A press fails with "All LLM providers failed".
+    "groq>=1.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.scripts]
