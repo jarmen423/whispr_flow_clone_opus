@@ -164,14 +164,40 @@ def _refine_text(text: str, mode: str, processing_mode: str, translate: bool = F
 
 
 def _agent_query(text: str) -> dict:
-    """Send text to the voice agent API and return the answer.
+    """Send text to the voice agent and return the answer.
+
+    When VoiceUse is installed locally, runs the command through the
+    VoiceUse Brain pipeline (LLM → tool calls → OS control). When not
+    installed, falls back to the hosted API endpoint.
 
     Args:
-        text: The transcribed question text.
+        text: The transcribed question/command text.
 
     Returns:
-        dict: API response with keys success, answer, etc.
+        dict: Response with keys success, answer, etc.
     """
+    # Try local VoiceUse Brain first
+    try:
+        from localflow_agent.agent_bridge import is_available, run_agent
+
+        if is_available():
+            log_info("Running voice command via VoiceUse Brain...")
+            result = run_agent(text)
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "answer": result.get("message", ""),
+                }
+            else:
+                error = result.get("message") or "Agent execution failed"
+                log_error(f"VoiceUse Brain failed: {error}")
+                return {"success": False, "error": error}
+    except ImportError:
+        pass  # agent_bridge not available, fall through to hosted API
+    except Exception as e:
+        log_warning(f"Local agent bridge error, falling back to hosted API: {e}")
+
+    # Fallback: hosted API
     try:
         endpoint = f"{CONFIG.api_url.rstrip('/')}/api/agent/query"
         response = requests.post(
