@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>LocalFlow vs Wispr Flow</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+              background: #f5f1eb;
+              font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Georgia', serif;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              padding: 40px;
+            }
+
+            .card {
+                width: 820px;
+                background: #272320;
+                border-radius: 20px;
+                border: 1px solid #5c5248;
+                overflow: hidden;
+                position: relative;
+            }
+
+            /* --- Bigger, taller header that echoes the dictation overlay --- */
+            .card-header {
+                background: #332d28;
+                padding: 28px 32px;
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                border-bottom: 1px solid #5c5248;
+            }
+
+            .rec-dot {
+                width: 14px;
+                height: 14px;
+                border-radius: 60%;
+                background: #ff6b6b;
+                animation: pulse 1.5s ease-in-out infinite;
+                flex-shrink: 0;
+            }
+
+            @keyframes pulse {
+                0%,
+                100% {
+                    opacity: 1;
+                    box-shadow: 0 0 10px rgba(255, 107, 107, 0.6);
+                }
+                50% {
+                    opacity: 0.5;
+                    box-shadow: 0 0 16px rgba(194, 112, 61, 0.3);
+                }
+            }
+
+            .card-header h2 {
+                color: #f5f1eb;
+                font-size: 22px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+            }
+
+            .waveform {
+                display: flex;
+                gap: 8px;
+                margin-left: auto;
+                align-items: center;
+                height: 44px;
+            }
+
+            .waveform .bar {
+                width: 10px;
+                border-radius: 4px;
+                animation: wave 1s ease-in-out infinite;
+            }
+
+            .waveform .bar:nth-child(1) {
+                background: #ff6b6b;
+                height: 24px;
+                animation-delay: 0s;
+            }
+            .waveform .bar:nth-child(2) {
+                background: #4ecdc4;
+                height: 36px;
+                animation-delay: 0.1s;
+            }
+            .waveform .bar:nth-child(3) {
+                background: #45b7d1;
+                height: 28px;
+                animation-delay: 0.2s;
+            }
+            .waveform .bar:nth-child(4) {
+                background: #96ceb4;
+                height: 40px;
+                animation-delay: 0.3s;
+            }
+            .waveform .bar:nth-child(5) {
+                background: #feca57;
+                height: 20px;
+                animation-delay: 0.4s;
+            }
+            .waveform .bar:nth-child(6) {
+                background: #ff6b6b;
+                height: 32px;
+                animation-delay: 0.15s;
+            }
+            .waveform .bar:nth-child(7) {
+                background: #4ecdc4;
+                height: 26px;
+                animation-delay: 0.35s;
+            }
+
+            @keyframes wave {
+                0%,
+                100% {
+                    transform: scaleY(0.5);
+                }
+                50% {
+                    transform: scaleY(1);
+                }
+            }
+
+            /* --- Compact comparison body --- */
+            .comparison {
+                display: grid;
+                grid-template-columns: 1fr 1px 1fr;
+            }
+
+            .divider {
+                background: #5c5248;
+                width: 1px;
+            }
+
+            .side {
+                padding: 22px 22px;
+            }
+
+            .side h3 {
+                font-size: 20px;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                margin-bottom: 14px;
+                font-weight: 700;
+            }
+
+            .side.wispr h3 {
+                color: #c2703d;
+            }
+            .side.localflow h3 {
+                color: #4caf78;
+            }
+
+            .price-row {
+                font-size: 36px;
+                font-weight: 700;
+                margin-bottom: 4px;
+                letter-spacing: -1px;
+                color: #f5f1eb;
+            }
+
+            .side.localflow .price-row .free {
+                color: #4caf78;
+            }
+
+            .price-sub {
+                font-size: 16px;
+                color: #a0988a;
+                margin-bottom: 18px;
+            }
+
+            .feature-list {
+                list-style: none;
+            }
+
+            .feature-list li {
+                font-size: 15px;
+                color: #c4b8a8;
+                padding: 4px 0;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                line-height: 1.3;
+            }
+
+            .feature-list li::before {
+                content: "";
+                width: 5px;
+                height: 5px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }
+
+            .side.wispr .feature-list li::before {
+                background: #c2703d;
+            }
+            .side.localflow .feature-list li::before {
+                background: #4caf78;
+            }
+
+            .feature-list li .highlight {
+                color: #f5f1eb;
+                font-weight: 600;
+            }
+
+            .stat-badge {
+                display: inline-block;
+                font-size: 11px;
+                padding: 3px 8px;
+                border-radius: 5px;
+                margin-top: 14px;
+                font-weight: 600;
+            }
+
+            .side.wispr .stat-badge {
+                background: rgba(194, 112, 61, 0.15);
+                color: #c2703d;
+                border: 1px solid rgba(194, 112, 61, 0.3);
+            }
+
+            .side.localflow .stat-badge {
+                background: rgba(76, 175, 120, 0.15);
+                color: #4caf78;
+                border: 1px solid rgba(76, 175, 120, 0.3);
+            }
+
+            /* --- Footer with both install commands --- */
+            .card-footer {
+                background: #332d28;
+                padding: 18px 28px;
+                border-top: 1px solid #5c5248;
+            }
+
+            .footer-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 6px 0;
+            }
+
+            .footer-label {
+                color: #a0988a;
+                font-size: 12px;
+                font-weight: 600;
+                width: 70px;
+                flex-shrink: 0;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+
+            .footer-cmd {
+                font-family: "JetBrainsMono Nerd Font Mono", "Courier New", monospace;
+                font-size: 12px;
+                color: #4caf78;
+            }
+
+            .footer-link {
+                font-family: "JetBrainsMono Nerd Font Mono", "Courier New", monospace;
+                font-size: 12px;
+                color: #c4a882;
+            }
+
+            .shimmer {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.15),
+                    transparent
+                );
+                animation: shimmer-sweep 3s ease-in-out infinite;
+            }
+
+            @keyframes shimmer-sweep {
+                0% {
+                    transform: translateX(-100%);
+                }
+                100% {
+                    transform: translateX(100%);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="shimmer"></div>
+
+            <div class="card-header">
+                <div class="rec-dot"></div>
+                <h2>REC — Price Comparison</h2>
+                <div class="waveform">
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                </div>
+            </div>
+
+            <div class="comparison">
+                <div class="side wispr">
+                    <h3>Wispr Flow</h3>
+                    <div class="price-row">
+                        $15<span style="font-size: 20px; color: #a09888"
+                            >/mo</span
+                        >
+                    </div>
+                    <div class="price-sub">$432 over 3 years</div>
+                    <ul class="feature-list">
+                        <li>
+                            <span class="highlight">Whisper Large v3</span>
+                            (same model)
+                        </li>
+                        <li>2,000 words/week free cap</li>
+                        <li>Cloud-only, no offline mode</li>
+                        <li>Closed source</li>
+                        <li>$81M VC funded</li>
+                    </ul>
+                    <div class="stat-badge">270 Fortune 500 customers</div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="side localflow">
+                    <h3>LocalFlow</h3>
+                    <div class="price-row"><span class="free">Free</span></div>
+                    <div class="price-sub">Open source. BYOK Groq[free]. Or Local</div>
+                    <ul class="feature-list">
+                        <li>
+                            <span class="highlight">Whisper Large v3</span>
+                            (same model)
+                        </li>
+                        <li>Unlimited, no word cap</li>
+                        <li>Local processing mode</li>
+                        <li>Open source (MIT)</li>
+                        <li>~50x real-time, 6 modes + translation</li>
+                        <li>Windows, Mac, Linux</li>
+                    </ul>
+                    <div class="stat-badge">One-command install</div>
+                </div>
+            </div>
+
+            <div class="card-footer">
+                <div class="footer-row">
+                    <span class="footer-label">Install</span>
+                    <span class="footer-link">dictate.agentmemorylabs.com</span>
+                </div>
+                <div class="footer-row">
+                    <span class="footer-label">Windows</span>
+                    <span class="footer-cmd"
+                        >irm
+                        https://dictate.agentmemorylabs.com/api/download?platform=windows
+                        | iex</span
+                    >
+                </div>
+                <div class="footer-row">
+                    <span class="footer-label">Mac/Linux</span>
+                    <span class="footer-cmd"
+                        >curl -fsSL
+                        https://dictate.agentmemorylabs.com/api/download?platform=linux
+                        | bash</span
+                    >
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
