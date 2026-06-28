@@ -822,6 +822,13 @@ def _print_background_banner(agent: "LocalFlowAgent") -> None:
     """Print hotkey summary before detaching to background."""
     config_path = os.path.expanduser("~/.localflow/config.json")
 
+    # Check if voice agent mode is available
+    try:
+        from localflow_agent.agent_bridge import is_available as _agent_available
+        agent_installed = _agent_available()
+    except Exception:
+        agent_installed = False
+
     print()
     print("  LocalFlow agent is running in the background.")
     print()
@@ -839,10 +846,24 @@ def _print_background_banner(agent: "LocalFlowAgent") -> None:
         if hk:
             print(f"    {_pretty_hotkey(hk):<16} {label}")
 
+    # Agent mode hotkey
+    agent_hk = getattr(agent, "agent_hotkey", None)
+    if agent_hk:
+        if agent_installed:
+            print(f"    {_pretty_hotkey(agent_hk):<16} Voice agent (control your computer)")
+        else:
+            print(f"    {_pretty_hotkey(agent_hk):<16} Voice agent (not installed)")
+
     print()
     print(f"  To change hotkeys, edit:")
     print(f"    {config_path}")
     print()
+
+    if not agent_installed:
+        print("  Voice agent mode available! Control your computer by voice.")
+        print("  Install: pip install localflow-agent[agent]")
+        print()
+
     print("  To stop:        localflow-agent --stop")
     print("  For debugging:  localflow-agent --foreground")
     print()
