@@ -19,28 +19,38 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("localflow.agent_bridge")
 
-# Cache the Brain instance across calls so we don't reconstruct the LLM
-# client, OS controller, and TTS engine on every hotkey press.
+# Cache the Brain instance + persistent event loop across calls so we
+# don't reconstruct the LLM client, OS controller, and TTS engine on
+# every hotkey press. The persistent loop is critical: the TTS worker
+# (_queue_worker) is a long-running asyncio Task that must stay alive
+# on the same loop where speak() enqueues text.
 _brain_instance: Any = None
+_bg_loop: Optional[asyncio.AbstractEventLoop] = None
+_bg_thread: Optional[threading.Thread] = None
 
-# Default config path: ~/.localflow/voiceuse.yaml. The setup wizard
-# creates this if the user opts into the voice-agent extra. If the file
-# is missing, VoiceUse falls back to its built-in defaults (which read
-# API keys from environment variables).
+# Default config path: ~/.localflow/voiceuse.yaml.
 _DEFAULT_CONFIG_PATH = os.path.expanduser("~/.localflow/voiceuse.yaml")
 
 
+def _bg_loop_runner(loop: asyncio.AbstractEventLoop) -> None:
+    """Run the persistent event loop in a daemon thread."""
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
 def _get_brain(config_path: Optional[str] = None) -> Any:
-    """Construct (or return cached) VoiceUse Brain with all subsystems.
+    """Construct (or return cached) VoiceUse Brain with a persistent loop.
 
     Imports voiceuse lazily so this module is import-safe even when
     voice-computer-use-agent is not installed.
     """
-    global _brain_instance
+    global _brain_instance, _bg_loop, _bg_thread
+
     if _brain_instance is not None:
         return _brain_instance
 
@@ -51,8 +61,6 @@ def _get_brain(config_path: Optional[str] = None) -> Any:
     from voiceuse.tts_manager import TTSManager
     from voiceuse.brain import Brain
 
-    # Load VoiceUse config from YAML if available, otherwise use defaults.
-    # API keys resolve from environment variables via pydantic validators.
     cfg = Config.from_yaml(config_path) if config_path else Config()
 
     os_controller = OSController(config=cfg)
@@ -60,17 +68,19 @@ def _get_brain(config_path: Optional[str] = None) -> Any:
     safety_guard = SafetyGuard(config=cfg)
     tts_manager = TTSManager(config=cfg)
 
-    # TTSManager.start() is async (starts the playback loop). Run it once
-    # during brain construction.
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(tts_manager.start())
-    finally:
-        loop.close()
+    # Create a persistent event loop running in a daemon thread. The TTS
+    # worker (_queue_worker) needs this loop to stay alive so it can
+    # process the speech queue when speak() is called later.
+    _bg_loop = asyncio.new_event_loop()
+    _bg_thread = threading.Thread(
+        target=_bg_loop_runner, args=(_bg_loop,), daemon=True, name="voiceuse-loop"
+    )
+    _bg_thread.start()
 
-    # Confirmation callback: in LocalFlow context there's no wake-word/STT
-    # confirmation loop available. Return empty string (deny) so destructive
-    # actions are blocked unless the user re-enables them in VoiceUse config.
+    # Start the TTS worker on the persistent loop (blocks until started).
+    future = asyncio.run_coroutine_threadsafe(tts_manager.start(), _bg_loop)
+    future.result(timeout=10)
+
     def _get_confirmation_text(tool_name: str, parameters: dict) -> str:
         logger.info(
             "Safety confirmation requested for %s — auto-denying "
@@ -93,7 +103,11 @@ def _get_brain(config_path: Optional[str] = None) -> Any:
     return brain
 
 
-def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = False) -> Dict[str, Any]:
+def run_agent(
+    transcript: str,
+    config_path: Optional[str] = None,
+    ghost: bool = False,
+) -> Dict[str, Any]:
     """Execute a voice command through the VoiceUse Brain pipeline.
 
     Called from LocalFlow's _stop_recording when agent_mode_active is True.
@@ -101,23 +115,16 @@ def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = 
 
     Args:
         transcript: The transcribed voice command text.
-        config_path: Optional path to a VoiceUse config.yaml. If not
-            provided, defaults to ~/.localflow/voiceuse.yaml (created
-            by the setup wizard if the user opted into the voice-agent
-            extra). If that file is missing too, VoiceUse's built-in
-            defaults are used.
+        config_path: Optional path to a VoiceUse config.yaml.
+        ghost: When True, suppress TTS playback.
 
     Returns:
-        Dict with keys:
-            success (bool): Whether the command executed successfully.
-            message (str): Human-readable result or error message.
-            data (dict|None): Additional structured data from the result.
+        Dict with keys: success, message, data.
     """
-    # Resolve the config path: explicit arg wins, then ~/.localflow/voiceuse.yaml
     effective_path = config_path or _DEFAULT_CONFIG_PATH
     if config_path is None and not os.path.exists(_DEFAULT_CONFIG_PATH):
-        # Let VoiceUse use its built-in defaults (which read from env vars)
         effective_path = None
+
     try:
         brain = _get_brain(effective_path)
     except ImportError:
@@ -137,26 +144,32 @@ def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = 
             "data": None,
         }
 
-    loop = asyncio.new_event_loop()
+    # Run the Brain pipeline on the persistent background loop so the
+    # TTS worker is on the same loop and can actually pick up speak() calls.
+    loop = _bg_loop
     try:
-        result = loop.run_until_complete(brain.process_command(transcript))
+        future = asyncio.run_coroutine_threadsafe(
+            brain.process_command(transcript), loop
+        )
+        result = future.result(timeout=60)
 
         # Speak the response so the agent isn't a silent ghost.
-        # The TTS manager is async (edge-tts queue worker), so we call
-        # speak() on the same loop and then keep the loop alive briefly
-        # so the audio actually plays before we tear it down.
+        # speak() just enqueues to the asyncio queue; the worker (running
+        # on the same persistent loop) picks it up and plays the audio.
         if result.success and result.message and not ghost:
             try:
-                loop.run_until_complete(
-                    brain.tts_manager.speak(result.message, interrupt=True)
+                speak_future = asyncio.run_coroutine_threadsafe(
+                    brain.tts_manager.speak(result.message, interrupt=True), loop
                 )
-                # Give the TTS worker a moment to actually synthesize+play.
-                # edge-tts streams audio chunks; ~2s is enough for a short
-                # answer without blocking too long if the user starts a new
-                # dictation immediately after.
-                loop.run_until_complete(asyncio.sleep(2.0))
+                speak_future.result(timeout=5)
+                # The worker is now processing. Give it time to synthesize
+                # and play before we return. The loop keeps running in the
+                # daemon thread so playback continues even after we return.
+                import time as _time
+                _time.sleep(2.0)
             except Exception as tts_err:
                 logger.debug("TTS playback failed (non-fatal): %s", tts_err)
+
     except Exception as exc:
         logger.exception("Agent execution failed")
         return {
@@ -164,8 +177,6 @@ def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = 
             "message": f"Agent execution error: {exc}",
             "data": None,
         }
-    finally:
-        loop.close()
 
     return {
         "success": result.success,
@@ -175,11 +186,7 @@ def run_agent(transcript: str, config_path: Optional[str] = None, ghost: bool = 
 
 
 def is_available() -> bool:
-    """Check whether voiceuse is importable (for settings display).
-
-    Returns True if the voice-computer-use-agent package is installed
-    and importable, False otherwise. Does not raise.
-    """
+    """Check whether voiceuse is importable."""
     try:
         import voiceuse  # noqa: F401
         return True
