@@ -12,13 +12,15 @@ Purpose:
     - Easy to toggle and restore exactly.
     - Works across all playback sources (system-wide).
 
+    Also provides per-session "duck" functionality: mute specific
+    applications (Chrome, Spotify, etc.) while leaving others
+    (e.g. the TTS playback) unmuted. This is used during agent TTS
+    playback so the user hears the agent clearly over background music.
+
 Implementation:
     Windows-only using pycaw (Python bindings for Core Audio APIs).
     Gracefully degrades on non-Windows platforms or if pycaw is unavailable
     (logs a warning, continues without audio control).
-
-    The controller saves the *previous mute state* (muted or not) and
-    restores it on stop — even if the user had manually muted before starting.
 
 Dependencies:
     - pycaw (Windows only; optional)
@@ -27,21 +29,33 @@ Dependencies:
 Integration:
     Instantiated in LocalFlowAgent.__init__.
     Called from _start_recording() and _stop_recording().
+    duck_sessions()/unduck_sessions() called from agent_bridge TTS path.
 """
 
 import sys
-from typing import Optional
+from typing import Optional, Dict, List
 
 from .config import log_info, log_warning, log_error, log_debug
 
 
 class SystemAudioController:
-    """Controls system master audio mute state (Windows-only)."""
+    """Controls system master audio mute state (Windows-only).
+
+    Also supports per-session audio ducking: mute individual application
+    audio sessions (Chrome, Spotify, Discord, etc.) while leaving others
+    at full volume. This is used when the agent speaks via TTS so the
+    user hears the agent clearly over background music.
+    """
+
+    # Process names that should NOT be ducked during TTS (the TTS
+    # playback engine itself, plus the LocalFlow agent).
+    _UNDUCKABLE_PROCESSES = {"python.exe", "pythonw.exe", "py.exe"}
 
     def __init__(self) -> None:
         self._enabled = False
         self._previous_mute: Optional[int] = None  # 0 or 1
         self._volume_interface = None
+        self._ducked_sessions: Dict[str, float] = {}  # pid -> previous volume
 
         if sys.platform != "win32":
             log_debug("SystemAudioController: Not on Windows, audio mute disabled")
@@ -51,7 +65,6 @@ class SystemAudioController:
             from pycaw.pycaw import AudioUtilities
 
             device = AudioUtilities.GetSpeakers()
-            # Modern pycaw (2024+) exposes EndpointVolume directly as the IAudioEndpointVolume pointer
             vol = getattr(device, 'EndpointVolume', None)
             if vol is None:
                 raise RuntimeError('EndpointVolume not available on this pycaw/AudioDevice')
@@ -72,22 +85,19 @@ class SystemAudioController:
         """Return True if audio control is available and active."""
         return self._enabled and self._volume_interface is not None
 
-    def mute_for_recording(self) -> bool:
-        """
-        Mute system audio for the duration of recording.
+    # ------------------------------------------------------------------
+    # Master mute (used during dictation recording)
+    # ------------------------------------------------------------------
 
-        Saves the current mute state so it can be restored later.
-        Returns True if mute was successfully applied (or already muted).
-        """
+    def mute_for_recording(self) -> bool:
+        """Mute system audio for the duration of recording."""
         if not self.is_enabled():
             return False
 
         try:
-            # Save previous state
             self._previous_mute = self._volume_interface.GetMute()
             log_debug(f"SystemAudioController: Previous mute state = {self._previous_mute}")
 
-            # Set mute ON (1)
             self._volume_interface.SetMute(1, None)
             log_info("SystemAudioController: System audio MUTED for dictation")
             return True
@@ -97,17 +107,12 @@ class SystemAudioController:
             return False
 
     def restore_after_recording(self) -> bool:
-        """
-        Restore the previous system audio mute state.
-
-        Safe to call even if mute_for_recording was never called or failed.
-        Returns True if restore succeeded.
-        """
+        """Restore the previous system audio mute state."""
         if not self.is_enabled():
             return False
 
         if self._previous_mute is None:
-            log_debug("SystemAudioController: No previous state to restore (was not muted by us)")
+            log_debug("SystemAudioController: No previous state to restore")
             return False
 
         try:
@@ -120,6 +125,100 @@ class SystemAudioController:
             log_error(f"SystemAudioController: Failed to restore audio state: {e}")
             self._previous_mute = None
             return False
+
+    # ------------------------------------------------------------------
+    # Per-session ducking (used during agent TTS playback)
+    # ------------------------------------------------------------------
+
+    def duck_sessions(self) -> bool:
+        """Mute all non-TTS application audio sessions.
+
+        Iterates all active audio sessions (Chrome, Spotify, Discord, etc.)
+        and saves+mutes each one, EXCEPT python.exe/pythonw.exe (the TTS
+        playback process). This lets the agent's TTS be heard clearly
+        over background music.
+
+        Returns True if at least one session was ducked.
+        """
+        if not self.is_enabled():
+            return False
+
+        try:
+            from pycaw.pycaw import AudioUtilities
+            sessions = AudioUtilities.GetAllSessions()
+            ducked = 0
+            self._ducked_sessions.clear()
+
+            for session in sessions:
+                try:
+                    vol = session.SimpleAudioVolume
+                    if vol is None:
+                        continue
+                    pid = session.ProcessId
+                    proc_name = ""
+                    if session.Process:
+                        proc_name = session.Process.name() or ""
+
+                    # Skip our own process (TTS plays through pygame in python)
+                    if proc_name.lower() in self._UNDUCKABLE_PROCESSES:
+                        log_debug(f"Duck: skipping {proc_name} (pid={pid}) — TTS/localflow")
+                        continue
+
+                    # Save current volume then mute
+                    current_vol = vol.GetMute()
+                    self._ducked_sessions[pid] = current_vol
+                    vol.SetMute(1, None)
+                    ducked += 1
+                    log_debug(f"Duck: muted {proc_name} (pid={pid})")
+                except Exception:
+                    continue
+
+            if ducked > 0:
+                log_info(f"SystemAudioController: Ducked {ducked} audio session(s) for TTS")
+            else:
+                log_debug("SystemAudioController: No sessions to duck")
+            return ducked > 0
+        except Exception as e:
+            log_error(f"SystemAudioController: duck_sessions failed: {e}")
+            return False
+
+    def unduck_sessions(self) -> bool:
+        """Restore volume for all sessions that were ducked."""
+        if not self.is_enabled():
+            return False
+
+        if not self._ducked_sessions:
+            return False
+
+        try:
+            from pycaw.pycaw import AudioUtilities
+            sessions = AudioUtilities.GetAllSessions()
+            restored = 0
+
+            for session in sessions:
+                try:
+                    pid = session.ProcessId
+                    if pid not in self._ducked_sessions:
+                        continue
+                    vol = session.SimpleAudioVolume
+                    prev_mute = self._ducked_sessions[pid]
+                    vol.SetMute(prev_mute, None)
+                    restored += 1
+                except Exception:
+                    continue
+
+            self._ducked_sessions.clear()
+            if restored > 0:
+                log_info(f"SystemAudioController: Restored {restored} ducked session(s)")
+            return restored > 0
+        except Exception as e:
+            log_error(f"SystemAudioController: unduck_sessions failed: {e}")
+            self._ducked_sessions.clear()
+            return False
+
+    # ------------------------------------------------------------------
+    # Emergency
+    # ------------------------------------------------------------------
 
     def force_unmute(self) -> None:
         """Emergency helper to force-unmute (used in cleanup/error paths)."""

@@ -157,18 +157,34 @@ def run_agent(
         # speak() just enqueues to the asyncio queue; the worker (running
         # on the same persistent loop) picks it up and plays the audio.
         if result.success and result.message and not ghost:
+            # Duck (mute) all other app audio sessions so the TTS voice
+            # is clearly audible. We skip our own python process so
+            # pygame's TTS playback isn't muted.
+            _ducker = None
+            try:
+                from .audio_control import SystemAudioController
+                _ducker = SystemAudioController()
+                _ducker.duck_sessions()
+            except Exception as duck_err:
+                logger.debug("Session ducking failed (non-fatal): %s", duck_err)
+
             try:
                 speak_future = asyncio.run_coroutine_threadsafe(
                     brain.tts_manager.speak(result.message, interrupt=True), loop
                 )
                 speak_future.result(timeout=5)
-                # The worker is now processing. Give it time to synthesize
-                # and play before we return. The loop keeps running in the
-                # daemon thread so playback continues even after we return.
+                # Give TTS time to synthesize+play.
                 import time as _time
                 _time.sleep(2.0)
             except Exception as tts_err:
                 logger.debug("TTS playback failed (non-fatal): %s", tts_err)
+            finally:
+                # Restore the ducked sessions
+                if _ducker:
+                    try:
+                        _ducker.unduck_sessions()
+                    except Exception:
+                        pass
 
     except Exception as exc:
         logger.exception("Agent execution failed")
