@@ -7,7 +7,7 @@ name = "localflow-agent"
 version = "1.0.1"
 description = "LocalFlow desktop agent — system-wide dictation via global hotkeys."
 readme = "agent/README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "LocalFlow" }]
 keywords = ["dictation", "speech-to-text", "whisper", "accessibility"]
@@ -31,6 +31,17 @@ dependencies = [
     "pyautogui>=0.9.54",
     "python-dotenv>=1.0.0",
     "pycaw>=20240210",  # Windows Core Audio control (master volume mute) for auto-mute during dictation
+]
+
+[project.optional-dependencies]
+# Agent mode (Alt+A): voice-controlled computer use via VoiceUse.
+# Install with: pip install localflow-agent[agent]
+# Dictation-only users do NOT need these deps.
+agent = [
+    "voice-computer-use-agent>=0.1.0",
+    "mss>=9.0.1",
+    "pygetwindow>=0.0.9",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.scripts]
