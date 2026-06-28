@@ -140,6 +140,23 @@ def run_agent(transcript: str, config_path: Optional[str] = None) -> Dict[str, A
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(brain.process_command(transcript))
+
+        # Speak the response so the agent isn't a silent ghost.
+        # The TTS manager is async (edge-tts queue worker), so we call
+        # speak() on the same loop and then keep the loop alive briefly
+        # so the audio actually plays before we tear it down.
+        if result.success and result.message:
+            try:
+                loop.run_until_complete(
+                    brain.tts_manager.speak(result.message, interrupt=True)
+                )
+                # Give the TTS worker a moment to actually synthesize+play.
+                # edge-tts streams audio chunks; ~2s is enough for a short
+                # answer without blocking too long if the user starts a new
+                # dictation immediately after.
+                loop.run_until_complete(asyncio.sleep(2.0))
+            except Exception as tts_err:
+                logger.debug("TTS playback failed (non-fatal): %s", tts_err)
     except Exception as exc:
         logger.exception("Agent execution failed")
         return {
