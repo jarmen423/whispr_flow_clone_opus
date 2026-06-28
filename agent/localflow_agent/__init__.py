@@ -99,6 +99,7 @@ from .recovery import (
     _cleanup_failed_recordings,
 )
 from .audio_control import SystemAudioController
+from .setup_wizard import _run_setup_wizard
 # Presentation of the Recovery Console and the age-formatting helpers moved to
 # recovery_console.py; successful-transcript history lives in history.py.
 from .recovery_console import generate_recovery_console, _format_age_short
@@ -818,6 +819,83 @@ def _pretty_hotkey(hk: str) -> str:
     return "+".join(p.strip().capitalize() for p in hk.split("+"))
 
 
+def _print_diagnostics() -> None:
+    """Print install + environment diagnostics and exit. Used by --diag.
+
+    Helps users verify the agent is wired up correctly before they rely on
+    it. Reports Python version, platform, LocalFlow install location,
+    config file, log file, dependency importability, and (on Windows) the
+    default audio input device.
+    """
+    import platform
+    import shutil
+    import subprocess
+
+    print("LocalFlow agent diagnostics")
+    print("=" * 50)
+    print(f"  Python:        {sys.version.split()[0]} ({sys.executable})")
+    print(f"  Platform:      {platform.platform()}")
+    print(f"  localflow-agent: {shutil.which('localflow-agent') or 'NOT FOUND in PATH'}")
+    print(f"  Config file:   {os.path.expanduser('~/.localflow/config.json')}")
+    print(f"  Log file:      {os.path.expanduser('~/.localflow/agent.log')}")
+    print(f"  Failed dir:    {os.path.expanduser('~/.localflow/failed-recordings')}")
+    print(f"  History dir:   {os.path.expanduser('~/.localflow/history')}")
+    print()
+
+    # Dependency imports
+    print("Dependencies:")
+    for mod in ("pynput", "sounddevice", "numpy", "scipy", "requests",
+                "pyperclip", "pyautogui", "pycaw", "comtypes", "dotenv"):
+        try:
+            __import__(mod)
+            print(f"  [OK]    {mod}")
+        except ImportError as e:
+            print(f"  [MISS]  {mod}: {e}")
+    print()
+
+    # Optional: voiceuse / agent_bridge
+    try:
+        import voiceuse  # noqa: F401
+        print("  [OK]    voiceuse (agent mode available)")
+    except ImportError:
+        print("  [skip]  voiceuse (agent mode disabled)")
+    print()
+
+    # Audio device
+    try:
+        import sounddevice as sd
+        print("Audio input devices:")
+        for idx, dev in enumerate(sd.query_devices()):
+            if dev.get("max_input_channels", 0) > 0:
+                marker = "  <-- default" if idx == sd.default.device[0] else ""
+                print(f"  [{idx}] {dev['name']} (inputs={dev['max_input_channels']}){marker}")
+    except Exception as e:
+        print(f"  Could not query audio devices: {e}")
+    print()
+
+    # Background process check (Windows)
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq localflow-agent.exe"],
+                capture_output=True, text=True,
+            )
+            if "localflow-agent.exe" in result.stdout:
+                print("Background agent: RUNNING")
+                for line in result.stdout.splitlines():
+                    if "localflow-agent.exe" in line:
+                        print(f"  {line.strip()}")
+            else:
+                print("Background agent: NOT RUNNING")
+        except Exception as e:
+            print(f"  Could not check background process: {e}")
+    print()
+    print("If hotkeys aren't firing, see ~/.localflow/agent.log for the")
+    print("most recent error. Also try `localflow-agent --foreground` to")
+    print("see the live event loop output.")
+    print()
+
+
 def _print_background_banner(agent: "LocalFlowAgent") -> None:
     """Print hotkey summary before detaching to background."""
     config_path = os.path.expanduser("~/.localflow/config.json")
@@ -894,7 +972,12 @@ def _launch_in_background() -> None:
     extra_args = [a for a in sys.argv[1:] if a not in ("--stop",)]
 
     if sys.platform == "win32":
-        # Match whispr-flow.ps1: Start-Process powershell -Command "localflow-agent --foreground" -WindowStyle Hidden
+        # Match whispr-flow.ps1: a single Start-Process that launches the
+        # python agent in a hidden window. Hidden is fine here because
+        # the *python* process still runs in a real interactive desktop
+        # session (it's only the parent powershell that's hidden). The
+        # previous double-wrap with inner/outer powershell + log redirect
+        # made this fragile and caused silent failures.
         child_cmd_str = "localflow-agent --foreground"
         if extra_args:
             child_cmd_str += " " + " ".join(extra_args)
@@ -1017,10 +1100,28 @@ def main() -> None:
         action="store_true",
         help="Stop a running background agent.",
     )
+    parser.add_argument(
+        "--diag",
+        action="store_true",
+        help="Print diagnostic info (Python, platform, paths, deps, hotkeys, audio device) and exit. Use this to verify the install is wired up correctly.",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Run the first-run setup wizard: prompts for your Groq API key, offers to install the voice-agent extra, and validates that everything is wired up. Idempotent — safe to re-run.",
+    )
     args = parser.parse_args()
 
     if args.stop:
         _stop_background_agent()
+        sys.exit(0)
+
+    if args.diag:
+        _print_diagnostics()
+        sys.exit(0)
+
+    if args.setup:
+        _run_setup_wizard()
         sys.exit(0)
 
     agent = LocalFlowAgent()

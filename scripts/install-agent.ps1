@@ -169,3 +169,28 @@ Write-Host "  cd $InstallDir ; git pull ; uv tool install --editable --force ." 
 Write-Host ""
 Write-Warn "On first run, enter your Groq API key if prompted."
 Write-Host ""
+
+# First-run detection: if ~/.localflow/config.json has no api_key, offer
+# to run the setup wizard. This is much friendlier than dropping the user
+# straight into the background agent which would silently fail to transcribe.
+$ConfigPath = Join-Path $env:USERPROFILE ".localflow\config.json"
+$HasApiKey = $false
+if (Test-Path $ConfigPath) {
+    try {
+        $Existing = Get-Content $ConfigPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($Existing -and $Existing.api_key -and $Existing.api_key -notlike "your_*") {
+            $HasApiKey = $true
+        }
+    } catch { }
+}
+if (-not $HasApiKey) {
+    Write-Step "First-run setup detected — launching the setup wizard..."
+    Write-Host "  (The wizard will save your Groq API key and validate the install.)"
+    Write-Host ""
+    try {
+        & localflow-agent --setup
+    } catch {
+        Write-Warn "Setup wizard failed. You can re-run it any time with: localflow-agent --setup"
+    }
+}
+Write-Host ""

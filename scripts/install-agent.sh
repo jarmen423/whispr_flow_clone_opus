@@ -172,3 +172,25 @@ echo "  cd $INSTALL_DIR && git pull && uv tool install --editable --force ."
 echo ""
 warn "On first run, enter your Groq API key if prompted."
 echo ""
+
+# First-run detection: if ~/.localflow/config.json has no api_key, offer
+# to run the setup wizard. This is much friendlier than dropping the user
+# straight into the background agent which would silently fail to transcribe.
+ConfigPath="$HOME/.localflow/config.json"
+HasApiKey=false
+if [ -f "$ConfigPath" ]; then
+    if grep -q '"api_key"' "$ConfigPath" 2>/dev/null; then
+        HasApiKey=true
+    fi
+fi
+if [ "$HasApiKey" = false ]; then
+    step "First-run setup detected — launching the setup wizard..."
+    echo "  (The wizard will save your Groq API key and validate the install.)"
+    echo ""
+    if localflow-agent --setup; then
+        :
+    else
+        warn "Setup wizard failed. You can re-run it any time with: localflow-agent --setup"
+    fi
+fi
+echo ""

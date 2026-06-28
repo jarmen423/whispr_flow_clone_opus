@@ -27,6 +27,12 @@ logger = logging.getLogger("localflow.agent_bridge")
 # client, OS controller, and TTS engine on every hotkey press.
 _brain_instance: Any = None
 
+# Default config path: ~/.localflow/voiceuse.yaml. The setup wizard
+# creates this if the user opts into the voice-agent extra. If the file
+# is missing, VoiceUse falls back to its built-in defaults (which read
+# API keys from environment variables).
+_DEFAULT_CONFIG_PATH = os.path.expanduser("~/.localflow/voiceuse.yaml")
+
 
 def _get_brain(config_path: Optional[str] = None) -> Any:
     """Construct (or return cached) VoiceUse Brain with all subsystems.
@@ -96,8 +102,10 @@ def run_agent(transcript: str, config_path: Optional[str] = None) -> Dict[str, A
     Args:
         transcript: The transcribed voice command text.
         config_path: Optional path to a VoiceUse config.yaml. If not
-            provided, VoiceUse defaults are used and API keys are read
-            from environment variables.
+            provided, defaults to ~/.localflow/voiceuse.yaml (created
+            by the setup wizard if the user opted into the voice-agent
+            extra). If that file is missing too, VoiceUse's built-in
+            defaults are used.
 
     Returns:
         Dict with keys:
@@ -105,8 +113,13 @@ def run_agent(transcript: str, config_path: Optional[str] = None) -> Dict[str, A
             message (str): Human-readable result or error message.
             data (dict|None): Additional structured data from the result.
     """
+    # Resolve the config path: explicit arg wins, then ~/.localflow/voiceuse.yaml
+    effective_path = config_path or _DEFAULT_CONFIG_PATH
+    if config_path is None and not os.path.exists(_DEFAULT_CONFIG_PATH):
+        # Let VoiceUse use its built-in defaults (which read from env vars)
+        effective_path = None
     try:
-        brain = _get_brain(config_path)
+        brain = _get_brain(effective_path)
     except ImportError:
         return {
             "success": False,
