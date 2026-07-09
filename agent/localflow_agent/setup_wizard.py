@@ -273,6 +273,79 @@ def _print_next_steps(voice_agent_ready: bool) -> None:
     print()
 
 
+def _setup_wake_word_panel() -> None:
+    """TUI panel: configure wake-word and clap detection.
+
+    Opt-in only — leaves the existing "mic-off until you hold a key"
+    default intact. Writes results to ~/.localflow/config.json via
+    _save_config_file. Safe to re-run.
+    """
+    print()
+    print("Step 3: Wake-word / clap activation (hands-free dictation).")
+    print("  Optional. When enabled, your microphone will be always-on")
+    print("  listening for the wake word or a double-clap. Both are off by")
+    print("  default. Install the optional [wake] extra with:")
+    print("    pip install localflow-agent[wake]   (or uv tool install --editable '.[wake]')")
+    print()
+
+    cfg = _load_config_file()
+
+    # --- Wake word ---
+    current_yn = "yes" if cfg.get("wake_word_enabled", False) else "no"
+    answer = _prompt(f"Enable wake-word activation? (yes/no)", default=current_yn).strip().lower()
+    wake_enabled = answer.startswith("y")
+    cfg["wake_word_enabled"] = wake_enabled
+
+    if wake_enabled:
+        cfg["wake_word_dictation_phrase"] = _prompt(
+            "Dictation wake phrase (e.g. 'hey computer')",
+            default=str(cfg.get("wake_word_dictation_phrase", "hey computer")),
+        ).strip() or "hey computer"
+        cfg["wake_word_agent_phrase"] = _prompt(
+            "Agent-mode wake phrase (e.g. 'okay agent')",
+            default=str(cfg.get("wake_word_agent_phrase", "okay agent")),
+        ).strip() or "okay agent"
+        cfg["wake_word_stop_phrase"] = _prompt(
+            "Stop phrase (say to end the recording early)",
+            default=str(cfg.get("wake_word_stop_phrase", "end dictation")),
+        ).strip() or "end dictation"
+        timeout_raw = _prompt(
+            "Max recording window in seconds (safety cap, 0 = no limit)",
+            default=str(cfg.get("wake_word_timeout_seconds", 60)),
+        ).strip()
+        try:
+            cfg["wake_word_timeout_seconds"] = max(0, int(timeout_raw))
+        except ValueError:
+            cfg["wake_word_timeout_seconds"] = 60
+            log_warning("Invalid timeout value, using default 60s.")
+
+    # --- Clap ---
+    clap_yn = "yes" if cfg.get("clap_enabled", False) else "no"
+    clap_answer = _prompt(f"Enable double-clap activation? (yes/no)", default=clap_yn).strip().lower()
+    clap_enabled = clap_answer.startswith("y")
+    cfg["clap_enabled"] = clap_enabled
+
+    if clap_enabled:
+        thresh_raw = _prompt(
+            "Clap loudness threshold (dBFS, more negative = stricter, e.g. -25)",
+            default=str(cfg.get("clap_threshold_db", -25.0)),
+        ).strip()
+        try:
+            cfg["clap_threshold_db"] = float(thresh_raw)
+        except ValueError:
+            cfg["clap_threshold_db"] = -25.0
+            log_warning("Invalid threshold, using default -25.0 dBFS.")
+
+    _save_config_file(cfg)
+    log_info("Wake-word / clap settings saved.")
+
+    if wake_enabled or clap_enabled:
+        print()
+        print("  To start the listener:  localflow-agent --wake-word")
+        print("  To verify the install:  localflow-agent --diag")
+        print()
+
+
 def _run_setup_wizard() -> None:
     """Entry point for the `localflow-agent --setup` command."""
     _print_setup_banner()
@@ -342,9 +415,12 @@ def _run_setup_wizard() -> None:
             log_info("Skipped. Install later with: pip install voice-computer-use-agent")
             voice_agent_ready = False
 
-    # ---- Step 3: Validate ----
+    # ---- Step 3: Wake-word / clap ----
+    _setup_wake_word_panel()
+
+    # ---- Step 4: Validate ----
     print()
-    print("Step 3: Verifying install...")
+    print("Step 4: Verifying install...")
     deps_ok = True
     for mod in ("pynput", "sounddevice", "numpy", "scipy", "requests",
                 "pyperclip", "pyautogui", "pycaw", "dotenv"):
