@@ -56,6 +56,15 @@ agent = [
     "pygame>=2.5.0",
 ]
 
+# Wake-word activation (openWakeWord-based phrase detection). Optional —
+# dictation-only users do not need this. Install with:
+#     pip install localflow-agent[wake]
+# Combined with agent mode:
+#     pip install localflow-agent[wake,agent]
+wake = [
+    "openwakeword>=0.6.0",
+]
+
 [project.scripts]
 localflow-agent = "localflow_agent:main"
 localflow-recover = "localflow_agent:recover_main"
