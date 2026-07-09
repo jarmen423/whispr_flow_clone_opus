@@ -186,6 +186,19 @@ class Config:
     # transcript history (viewable via `localflow-agent --recover`),
     # but no audio is played.
     ghost_mode: bool = _env_bool("LOCALFLOW_GHOST_MODE", False)
+    # Wake-word activation (openWakeWord-based phrase detection) and double-clap
+    # detection. Opt-in only — defaults preserve the "mic-off until you hold a
+    # key" privacy model. See docs/plans/2026-06-29-wake-word-and-clap-detection.md.
+    wake_word_enabled: bool = _env_bool("LOCALFLOW_WAKE_WORD_ENABLED", False)
+    wake_word_start_mode: str = os.getenv("LOCALFLOW_WAKE_WORD_START_MODE", "wake")
+    wake_word_stop_mode: str = os.getenv("LOCALFLOW_WAKE_WORD_STOP_MODE", "any")
+    wake_word_dictation_phrase: str = os.getenv("LOCALFLOW_WAKE_WORD_DICTATION_PHRASE", "hey computer")
+    wake_word_agent_phrase: str = os.getenv("LOCALFLOW_WAKE_WORD_AGENT_PHRASE", "okay agent")
+    wake_word_stop_phrase: str = os.getenv("LOCALFLOW_WAKE_WORD_STOP_PHRASE", "end dictation")
+    wake_word_timeout_seconds: int = int(os.getenv("LOCALFLOW_WAKE_WORD_TIMEOUT_SECONDS", "60") or "60")
+    clap_enabled: bool = _env_bool("LOCALFLOW_CLAP_ENABLED", False)
+    clap_threshold_db: float = _env_float("LOCALFLOW_CLAP_THRESHOLD_DB", -25.0)
+    clap_window_ms: int = int(os.getenv("LOCALFLOW_CLAP_WINDOW_MS", "500") or "500")
 
 
 CONFIG = Config()
