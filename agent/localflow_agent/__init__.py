@@ -100,6 +100,7 @@ from .recovery import (
 )
 from .audio_control import SystemAudioController
 from .setup_wizard import _run_setup_wizard
+from .wake_listener import WakeListener
 # Presentation of the Recovery Console and the age-formatting helpers moved to
 # recovery_console.py; successful-transcript history lives in history.py.
 from .recovery_console import generate_recovery_console, _format_age_short
@@ -1014,6 +1015,70 @@ def _launch_in_background() -> None:
 
 
 
+def _run_wake_word_listener() -> None:
+    """Run the always-listening wake-word + clap listener.
+
+    Constructs a LocalFlowAgent (without registering its hotkeys — we
+    drive _start_recording / _stop_recording directly from the
+    WakeListener callbacks) and wires its on_start / on_stop to the
+    listener's signals. The agent's full pipeline is reused as-is:
+    overlay, audio controller, failed-recording lifecycle, API call,
+    paste, history save.
+
+    To stop: press Ctrl+C in this terminal, or run
+    `localflow-agent --stop` from another terminal (the latter only
+    works if the agent is also installed as a background service,
+    which --wake-word is not — so use Ctrl+C).
+    """
+    from .config import log_error, log_info
+    from .recording_overlay import RecordingOverlay
+
+    agent = LocalFlowAgent()
+
+    def on_start(mode: str) -> None:
+        agent_mode = (mode == "agent")
+        try:
+            agent._start_recording(agent_mode=agent_mode, source="wake_word")
+        except Exception as exc:
+            log_error(f"WakeListener on_start failed: {exc}")
+
+    def on_stop() -> None:
+        # Only stop if WE started a recording. The hotkey path is
+        # disabled in this subcommand (we never call agent.run()) so
+        # recording_source is guaranteed to be "wake_word" or None.
+        if agent.recording_source != "wake_word":
+            return
+        try:
+            agent._stop_recording()
+        except Exception as exc:
+            log_error(f"WakeListener on_stop failed: {exc}")
+
+    listener = WakeListener(on_start=on_start, on_stop=on_stop)
+
+    if not listener.start():
+        log_error(
+            "Failed to start wake-word listener. Check config and run "
+            "`localflow-agent --diag` for details."
+        )
+        sys.exit(1)
+
+    print()
+    print("  LocalFlow wake-word listener is running.")
+    print(f"    Start: {listener._start_mode}   Stop: {listener._stop_mode}   Timeout: {listener._timeout_s}s")
+    print()
+    print("  To stop:  Ctrl+C in this terminal")
+    print()
+
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.stop()
+        log_info("Wake-word listener shut down.")
+
+
 def main() -> None:
     """Application entry point.
 
@@ -1122,6 +1187,12 @@ def main() -> None:
         action="store_true",
         help="Run the first-run setup wizard: prompts for your Groq API key, offers to install the voice-agent extra, and validates that everything is wired up. Idempotent — safe to re-run.",
     )
+    parser.add_argument(
+        "--wake-word",
+        action="store_true",
+        help="Run the wake-word / clap listener (hands-free dictation activation). "
+             "Configure phrases and toggles via ~/.localflow/config.json or `localflow-agent --setup`.",
+    )
     args = parser.parse_args()
 
     if args.stop:
@@ -1135,6 +1206,10 @@ def main() -> None:
     if args.setup:
         _run_setup_wizard()
         sys.exit(0)
+
+    if args.wake_word:
+        _run_wake_word_listener()
+        return
 
     agent = LocalFlowAgent()
 
