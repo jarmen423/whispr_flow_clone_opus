@@ -869,6 +869,25 @@ def _print_diagnostics() -> None:
         print("  [skip]  voiceuse (agent mode disabled)")
     print()
 
+    # Wake-word / clap activation status
+    print("Wake-word activation:")
+    print(f"  wake_word_enabled:    {CONFIG.wake_word_enabled}")
+    print(f"  wake_word_start_mode: {CONFIG.wake_word_start_mode}")
+    print(f"  wake_word_stop_mode:  {CONFIG.wake_word_stop_mode}")
+    print(f"  dictation phrase:     {CONFIG.wake_word_dictation_phrase!r}")
+    print(f"  agent phrase:         {CONFIG.wake_word_agent_phrase!r}")
+    print(f"  stop phrase:          {CONFIG.wake_word_stop_phrase!r}")
+    print(f"  timeout (s):          {CONFIG.wake_word_timeout_seconds}")
+    print(f"  clap_enabled:         {CONFIG.clap_enabled}")
+    print(f"  clap threshold (dBFS):{CONFIG.clap_threshold_db}")
+    print(f"  clap window (ms):     {CONFIG.clap_window_ms}")
+    try:
+        import openwakeword  # noqa: F401
+        print("  [OK]    openwakeword installed")
+    except ImportError:
+        print("  [skip]  openwakeword (install with: pip install localflow-agent[wake])")
+    print()
+
     # Audio device
     try:
         import sounddevice as sd
