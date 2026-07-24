@@ -23,10 +23,11 @@ Key Technologies/APIs:
     - pynput.keyboard.Listener: Low-level key press/release tracking.
 """
 
-from typing import Optional
+from typing import Callable, Dict, Optional
 import time
 
 from pynput import keyboard
+from pynput.keyboard import HotKey, Listener as KeyboardListener
 
 from .config import log_info, log_warning, log_debug
 
@@ -36,6 +37,63 @@ from .config import log_info, log_warning, log_debug
 # single physical press. Without this debounce a press could instant-start
 # then instant-stop a toggle session.
 TOGGLE_DEBOUNCE_SECONDS: float = 0.25
+
+
+class InjectedAwareHotKeys(KeyboardListener):
+    """Global hotkey listener that accepts injected keystrokes.
+
+    Why this exists
+    ---------------
+    pynput's stock ``GlobalHotKeys`` silently drops every key event marked
+    ``injected=True`` (see ``GlobalHotKeys._on_press``:
+    ``if not injected: ...``).
+
+    Injected events are exactly what these tools produce:
+
+    - Logitech Options+ "Keyboard shortcut" button mappings
+    - AutoHotkey ``Send`` / ``SendInput``
+    - Other macro utilities that synthesize Alt+L / Alt+.
+
+    Physical keyboard presses work; mouse→keystroke remaps do not — unless
+    we accept injected events. That is the whole point of this class.
+
+    Risk note
+    ---------
+    Accepting injected keys means a runaway macro could re-trigger a hotkey.
+    LocalFlow's hotkeys are intentional remaps (mouse buttons, stream-deck
+    style tools), so that is the desired behavior. Paste uses Ctrl+V which
+    is not a registered recording hotkey.
+    """
+
+    def __init__(self, hotkeys: Dict[str, Callable[[], None]], *args, **kwargs):
+        """Build hotkey matchers and start listening like GlobalHotKeys.
+
+        Args:
+            hotkeys: Map of pynput combo strings (e.g. ``"<alt_l>+l"``) to
+                zero-arg callables invoked when the combo fully presses.
+        """
+        self._hotkeys = [
+            HotKey(HotKey.parse(combo), callback)
+            for combo, callback in hotkeys.items()
+        ]
+        super().__init__(
+            on_press=self._on_press,
+            on_release=self._on_release,
+            *args,
+            **kwargs,
+        )
+
+    def _on_press(self, key, injected: bool = False) -> None:
+        """Update hotkey state on key-down, including injected events."""
+        # Intentionally no ``if not injected`` guard — see class docstring.
+        for hotkey in self._hotkeys:
+            hotkey.press(self.canonical(key))
+
+    def _on_release(self, key, injected: bool = False) -> None:
+        """Clear hotkey state on key-up, including injected events."""
+        for hotkey in self._hotkeys:
+            hotkey.release(self.canonical(key))
+
 
 
 def _parse_hotkey(hotkey_str: str) -> set:
@@ -212,7 +270,7 @@ def setup_hotkey_listener(agent) -> object:
         This function must be called from the main thread as keyboard
         listeners have thread-safety requirements on some platforms.
     """
-    from pynput.keyboard import GlobalHotKeys, Key, KeyCode
+    from pynput.keyboard import Key
 
     hotkeys = {}
 
@@ -332,17 +390,18 @@ def setup_hotkey_listener(agent) -> object:
                 )
 
     log_info(f"Registering recording hotkeys: {list(hotkeys.keys())}")
-
-    agent.hotkey_listener = GlobalHotKeys(hotkeys)
+    # InjectedAwareHotKeys (not pynput GlobalHotKeys): accepts Logi Options+
+    # and AutoHotkey synthetic keystrokes. See class docstring for why.
+    agent.hotkey_listener = InjectedAwareHotKeys(hotkeys)
 
     agent.pressed_keys = set()
 
-    def on_press(key):
+    def on_press(key, injected=False):
         if agent.pasting_in_progress:
             return
         agent.pressed_keys.add(key)
 
-    def on_release(key):
+    def on_release(key, injected=False):
         if agent.pasting_in_progress:
             return
         agent.pressed_keys.discard(key)
