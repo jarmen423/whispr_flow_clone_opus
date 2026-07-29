@@ -27,9 +27,45 @@ from typing import Callable, Dict, Optional
 import time
 
 from pynput import keyboard
-from pynput.keyboard import HotKey, Listener as KeyboardListener
+from pynput.keyboard import (
+    Controller as _KBController,
+    HotKey,
+    Key,
+    Listener as KeyboardListener,
+)
 
 from .config import log_info, log_warning, log_debug
+
+# Shared controller for sending synthetic key-up events to clear stuck
+# modifiers after injected hotkey combos (see _release_stuck_modifiers).
+_kb_controller = _KBController()
+
+
+def _release_stuck_modifiers() -> None:
+    """Send synthetic key-up for all modifier keys at the OS level.
+
+    When Logitech Options+ or AutoHotkey injects a combo like Alt+., the
+    OS receives a synthetic Alt↓/Alt↑ pair. If the timing is off or focus
+    shifts between the ↓ and ↑ (overlay popup, paste, etc.), the OS can
+    leave Alt latched in the keyboard state. Subsequent physical
+    keystrokes then get interpreted as Alt-combos — Space becomes
+    Alt+Space, 'a' becomes Alt+A (triggering the voice agent with no
+    question), etc.
+
+    Sending explicit key-up events for every modifier guarantees a clean
+    keyboard state regardless of what the injection tool did. For physical
+    keyboard users this is a harmless no-op (the OS already tracked the
+    real ↑/↓ pair correctly; a redundant ↑ is ignored).
+    """
+    for key in (
+        Key.alt_l, Key.alt_r,
+        Key.ctrl_l, Key.ctrl_r,
+        Key.shift_l, Key.shift_r,
+    ):
+        try:
+            _kb_controller.release(key)
+        except Exception:
+            pass
 
 
 # Minimum gap between two toggle-press callbacks. pynput's GlobalHotKeys can
@@ -501,6 +537,15 @@ def _on_toggle_hotkey_press(agent) -> None:
         log_debug("Toggle ignored: hold recording active")
         return
 
+    # Clear any modifier keys left latched by the injection tool BEFORE
+    # acting. Logi Options+ sends a synthetic Alt↓ .↓ .↑ Alt↑ burst; if
+    # the Alt↑ is lost (focus shift, overlay popup), the OS keeps Alt held
+    # and subsequent events — including the paste inside _stop_recording —
+    # get interpreted as Alt-combos. Toggle mode never uses the release
+    # listener (recording_source != "hold"), so these synthetic key-ups
+    # cannot prematurely stop a recording.
+    _release_stuck_modifiers()
+
     if agent.recorder.is_recording():
         log_info("Toggle dictation: stopping recording")
         agent._stop_recording()
@@ -515,5 +560,8 @@ def _on_selection_hotkey(agent, format_target: str) -> None:
         return
     log_info(f"Formatting selected text as {format_target}")
     agent.overlay.show_status(f"{format_target.upper()} requested", bg_color="#24486b", duration=0.8)
+    # Same rationale as in _on_toggle_hotkey_press: clear latched modifiers
+    # left behind by the injection tool so subsequent typing is clean.
+    _release_stuck_modifiers()
     import threading
     threading.Thread(target=agent.format_selected_text, args=(format_target,), daemon=True).start()
